@@ -10,7 +10,7 @@ const std::string identifier_a = "1234-test-a";
 
 int main(int argc, char *argv[])
 {
-	constexpr const int queue_size = 8192;
+	constexpr const int queue_size = 16384;
 
 	log_.set_loglevel(logger::ll_fatal);
 
@@ -18,21 +18,23 @@ int main(int argc, char *argv[])
 	bool rc = q_a.begin();
 	assert(rc);
 
-	uint64_t total_recv    = 0;
-	uint64_t total_recv_ok = 0;
+	volatile uint64_t total_recv    = 0;
+	volatile uint64_t total_recv_ok = 0;
 
 	std::thread t1([&q_a, &total_recv, &total_recv_ok] {
+			printf("Thread 1 started\n");
 			for(;;) {
-				auto *p = reinterpret_cast<uint8_t *>(q_a.wait_for_message(100, shm_message_queue::msg_type(rand() % 3)));
+				auto *p = reinterpret_cast<uint8_t *>(q_a.wait_for_message(10, shm_message_queue::msg_type(rand() % 3)));
 				total_recv++;
 				total_recv_ok += !!p;
 			}
 		});
 
-	uint64_t total_sent    = 0;
-	uint64_t total_sent_ok = 0;
+	volatile uint64_t total_sent    = 0;
+	volatile uint64_t total_sent_ok = 0;
 
 	std::thread t2([&total_sent, &total_sent_ok] {
+			printf("Thread 2 started\n");
 			shm_message_queue::message *m = reinterpret_cast<shm_message_queue::message *>(new
 					uint8_t[queue_size - sizeof(shm_message_queue::shared_memory)]());
 			m->marker = 0xdeadbeef;

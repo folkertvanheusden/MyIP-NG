@@ -106,6 +106,7 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 			assert(m->marker == 0xdeadbeef);
 			uint32_t length       = m->size;
 			size_t   total_length = sizeof(message) + length;
+			printf("%u %d\n", length, m->type);
 			int      b3           = total_length & 7;
 			if (b3)
 				total_length += 8 - b3;
@@ -150,9 +151,10 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 
 bool shm_message_queue::send_message(const std::string & remote_identifier, const message *const m)
 {
-	uint32_t length           = m->size;
-	size_t   total_msg_length = sizeof(message) + length;
-	bool     ok               = false;
+	uint32_t length            = m->size;
+	size_t   total_msg_length  = sizeof(message) + length;
+	bool     ok                = false;
+	size_t   padded_msg_length = total_msg_length + (total_msg_length & 7 ? 8 - (total_msg_length & 7) : 0);
 
 	assert(m->marker == 0xdeadbeef);
 	assert(length > 0);
@@ -170,7 +172,7 @@ bool shm_message_queue::send_message(const std::string & remote_identifier, cons
 		return false;
 	}
 
-	if (total_msg_length + sizeof(shared_memory) > size_t(segment_stat.st_size)) {
+	if (padded_msg_length + sizeof(shared_memory) > size_t(segment_stat.st_size)) {
 		close(put_segment);
 		DOLOG(logger::ll_error, "message (%zu bytes) larger than shm (%lu bytes)", total_msg_length + sizeof(shared_memory), segment_stat.st_size);
 		return false;
@@ -189,12 +191,9 @@ bool shm_message_queue::send_message(const std::string & remote_identifier, cons
 		return false;
 	}
 
-	if (put_shm->total_size >= put_shm->filled + total_msg_length) {
+	if (put_shm->total_size >= put_shm->filled + padded_msg_length) {
 		memcpy(&put_shm->data[put_shm->filled], m, total_msg_length);
-		put_shm->filled += total_msg_length;
-		int b3 = total_msg_length & 7;
-		if (b3)
-			put_shm->filled += 8 - b3;
+		put_shm->filled += padded_msg_length;
 
 		if (int err = pthread_cond_signal(&put_shm->condition); err != 0) {
 			DOLOG(logger::ll_error, "pthread_cond_signal failed: %s", strerror(err));
