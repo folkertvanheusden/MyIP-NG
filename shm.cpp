@@ -8,6 +8,8 @@
 #include "shm.h"
 
 
+#define PAD8(x)  (((x) & 7) ? (x) + 8 - ((x) & 7) : (x))
+
 shm_message_queue::shm_message_queue(const std::string & local_identifier, const size_t size):
 	local_identifier(local_identifier),
 	size(size)
@@ -103,14 +105,11 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 	for(;;) {
 		uint8_t *end = &get_shm->data[get_shm->filled];
 		uint8_t *cur = &get_shm->data[0];
-		while(end - cur >= sizeof(message)) {
+		while(end - cur >= long(sizeof(message))) {
 			message *m      = reinterpret_cast<message *>(cur);
 			assert(m->marker == 0xdeadbeef);
 			uint32_t length       = m->size;
-			size_t   total_length = sizeof(message) + length;
-			int      b3           = total_length & 7;
-			if (b3)
-				total_length += 8 - b3;
+			size_t   total_length = PAD8(sizeof(message) + length);
 			assert(length > 0);
 
 			if (m->type == search_type || search_type == msg_any) {
@@ -155,7 +154,7 @@ bool shm_message_queue::send_message(const std::string & remote_identifier, cons
 	uint32_t length            = m->size;
 	size_t   total_msg_length  = sizeof(message) + length;
 	bool     ok                = false;
-	size_t   padded_msg_length = total_msg_length + (total_msg_length & 7 ? 8 - (total_msg_length & 7) : 0);
+	size_t   padded_msg_length = PAD8(total_msg_length);
 
 	assert(m->marker == 0xdeadbeef);
 	assert(length > 0);
