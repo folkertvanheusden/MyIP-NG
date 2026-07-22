@@ -42,18 +42,20 @@ bool shm_message_queue::begin()
 		return false;
 	}
 
-	bool is_new = segment_stat.st_size != ssize_t(size);
+	auto total_segment_size = size + sizeof(shared_memory);
+
+	bool is_new = segment_stat.st_size != ssize_t(total_segment_size);
 
 	if (is_new) {
 		DOLOG(logger::ll_info, "new shared memory segment");
 
-		if (ftruncate(get_segment, sizeof(shared_memory) + size) == -1) {
+		if (ftruncate(get_segment, total_segment_size) == -1) {
 			DOLOG(logger::ll_error, "ftruncate failed: %s", strerror(errno));
 			return false;
 		}
 	}
 
-	get_shm = reinterpret_cast<shared_memory *>(mmap(nullptr, sizeof(shared_memory) + size, PROT_READ | PROT_WRITE, MAP_SHARED, get_segment, 0));
+	get_shm = reinterpret_cast<shared_memory *>(mmap(nullptr, total_segment_size, PROT_READ | PROT_WRITE, MAP_SHARED, get_segment, 0));
 	if (get_shm == MAP_FAILED) {
 		DOLOG(logger::ll_error, "mmap failed: %s", strerror(errno));
 		return false;
