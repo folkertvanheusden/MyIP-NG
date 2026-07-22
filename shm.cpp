@@ -47,7 +47,7 @@ bool shm_message_queue::begin()
 	if (is_new) {
 		DOLOG(logger::ll_info, "new shared memory segment");
 
-		if (ftruncate(get_segment, size) == -1) {
+		if (ftruncate(get_segment, sizeof(shared_memory) + size) == -1) {
 			DOLOG(logger::ll_error, "ftruncate failed: %s", strerror(errno));
 			return false;
 		}
@@ -106,7 +106,6 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 			assert(m->marker == 0xdeadbeef);
 			uint32_t length       = m->size;
 			size_t   total_length = sizeof(message) + length;
-			printf("%u %d\n", length, m->type);
 			int      b3           = total_length & 7;
 			if (b3)
 				total_length += 8 - b3;
