@@ -20,7 +20,7 @@ public:
 		uint8_t         data[1];
 	};
 
-	enum msg_type { msg_new = 1, msg_reply = 2, msg_any = 0 /* any only as parameter to wait */ };
+	enum msg_type { msg_new = 1, msg_reply = 2, msg_any = 0 /* msg_any only as parameter to wait */ };
 	struct message {
 		uint32_t        marker;
 		uint32_t        size;
