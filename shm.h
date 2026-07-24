@@ -16,6 +16,7 @@ public:
 		pthread_cond_t  condition;
 		size_t          total_size;
 		size_t          filled;
+		uint64_t        most_recent_msg_nr;
 		uint8_t         data[1];
 	};
 
@@ -39,8 +40,8 @@ public:
 	shm_message_queue(const std::string & local_identifier, const size_t size);
 	virtual ~shm_message_queue();
 
-	bool        begin           ();
+	bool      begin           ();
 
-	message *   wait_for_message(const int timeout, const msg_type type, const std::optional<uint64_t> & msg_nr);
-	static bool send_message    (const std::string & remote_identifier, const message *const m);
+	message * wait_for_message(const int timeout, const msg_type type, const std::optional<uint64_t> & msg_nr);
+	bool      send_message    (const std::string & remote_identifier, message *const m);
 };

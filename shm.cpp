@@ -77,8 +77,9 @@ bool shm_message_queue::begin()
 		pthread_mutex_init(&get_shm->mutex, &mutex_attr);
 		pthread_mutexattr_destroy(&mutex_attr);
 
-		get_shm->total_size = size;
-		get_shm->filled     = 0;
+		get_shm->total_size         = size;
+		get_shm->filled             = 0;
+		get_shm->most_recent_msg_nr = 0;
 	}
 
 	return true;
@@ -158,7 +159,7 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 	return nullptr;
 }
 
-bool shm_message_queue::send_message(const std::string & remote_identifier, const message *const m)
+bool shm_message_queue::send_message(const std::string & remote_identifier, message *const m)
 {
 	uint32_t length            = m->size;
 	size_t   total_msg_length  = sizeof(message) + length;
@@ -168,50 +169,24 @@ bool shm_message_queue::send_message(const std::string & remote_identifier, cons
 	assert(m->marker == 0xdeadbeef);
 	assert(length > 0);
 
-	int      put_segment      = shm_open(remote_identifier.c_str(), O_RDWR, 0600);
-	if (put_segment == -1) {
-		DOLOG(logger::ll_warning, "cannot open shared memory segment for \"%s\": %s", remote_identifier.c_str(), strerror(errno));
-		return false;
-	}
+	m->msg_nr = ++get_shm->most_recent_msg_nr;
 
-	struct stat segment_stat { };
-	if (fstat(put_segment, &segment_stat) == -1) {
-		close(put_segment);
-		DOLOG(logger::ll_error, "fstat on shm failed: %s", strerror(errno));
-		return false;
-	}
-
-	// note the data[1] in the shared_memory header
-	if (padded_msg_length + sizeof(shared_memory) > size_t(segment_stat.st_size)) {
-		close(put_segment);
-		DOLOG(logger::ll_error, "message (%zu bytes) larger than shm (%lu bytes)", total_msg_length + sizeof(shared_memory), segment_stat.st_size);
-		return false;
-	}
-
-	shared_memory *put_shm  = reinterpret_cast<shared_memory *>(mmap(nullptr, segment_stat.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, put_segment, 0));
-	if (put_shm == MAP_FAILED) {
-		close(put_segment);
-		DOLOG(logger::ll_error, "mmap failed: %s", strerror(errno));
-		return false;
-	}
-
-	if (int err = pthread_mutex_lock(&put_shm->mutex); err != 0) {
+	if (int err = pthread_mutex_lock(&get_shm->mutex); err != 0) {
 		if (err == EOWNERDEAD) {
 			DOLOG(logger::ll_error, "pthread_mutex_lock returned EOWNERDEAD, \"repairing\" mutex...");
-			pthread_mutex_consistent(&put_shm->mutex);
+			pthread_mutex_consistent(&get_shm->mutex);
 		}
 		else {
-			close(put_segment);
 			DOLOG(logger::ll_error, "pthread_mutex_lock failed: %s", strerror(err));
 			return false;
 		}
 	}
 
-	if (put_shm->total_size >= put_shm->filled + padded_msg_length) {
-		memcpy(&put_shm->data[put_shm->filled], m, total_msg_length);
-		put_shm->filled += padded_msg_length;
+	if (get_shm->total_size >= get_shm->filled + padded_msg_length) {
+		memcpy(&get_shm->data[get_shm->filled], m, total_msg_length);
+		get_shm->filled += padded_msg_length;
 
-		if (int err = pthread_cond_signal(&put_shm->condition); err != 0) {
+		if (int err = pthread_cond_signal(&get_shm->condition); err != 0) {
 			DOLOG(logger::ll_error, "pthread_cond_signal failed: %s", strerror(err));
 		}
 		else {
@@ -222,14 +197,10 @@ bool shm_message_queue::send_message(const std::string & remote_identifier, cons
 		DOLOG(logger::ll_warning, "queue for \"%s\" full, dropping message", remote_identifier.c_str());
 	}
 
-	if (int err = pthread_mutex_unlock(&put_shm->mutex); err != 0) {
-		close(put_segment);
+	if (int err = pthread_mutex_unlock(&get_shm->mutex); err != 0) {
 		DOLOG(logger::ll_error, "pthread_mutex_unlock failed: %s", strerror(err));
 		return false;
 	}
-
-	munmap(put_shm, segment_stat.st_size);
-	close(put_segment);
 
 	return ok;
 }
