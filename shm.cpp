@@ -23,7 +23,6 @@ shm_message_queue::~shm_message_queue()
 		munmap(get_shm, size);
 	if (get_segment != -1)
 		close(get_segment);
-	shm_unlink(local_identifier.c_str());
 }
 
 bool shm_message_queue::begin()
