@@ -90,14 +90,15 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 	timespec ts { };
 
 	if (timeout >= 0) {
-		if (clock_gettime(CLOCK_REALTIME, &ts) == -1) {
-			DOLOG(logger::ll_error, "clock_gettime failed: %s", strerror(errno));
+		// the man-page of pthread_cond_timedwait says explicitly to use gettimeofday here
+		if (gettimeofday(&tv, nullptr) == -1) {
+			DOLOG(logger::ll_error, "gettimeofday failed: %s", strerror(errno));
 			return nullptr;
 		}
 
 		ts.tv_sec  += timeout / 1000;
-		ts.tv_nsec += (timeout % 1000) * 1'000'000ll;
-		if (ts.tv_nsec >= 1'000'000'000) {
+		ts.tv_nsec += (timeout % 1000) * 1'000'000;
+		while (ts.tv_nsec >= 1'000'000'000) {
 			ts.tv_sec++;
 			ts.tv_nsec -= 1'000'000'000;
 		}

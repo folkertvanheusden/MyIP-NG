@@ -42,6 +42,6 @@ public:
 
 	bool      begin           ();
 
-	message * wait_for_message(const int timeout, const msg_type type, const std::optional<uint64_t> & msg_nr);
+	message * wait_for_message(const int timeout /* milliseconds */, const msg_type type, const std::optional<uint64_t> & msg_nr);
 	bool      send_message    (const std::string & remote_identifier, message *const m);
 };
