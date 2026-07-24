@@ -84,7 +84,7 @@ bool shm_message_queue::begin()
 	return true;
 }
 
-shm_message_queue::message * shm_message_queue::wait_for_message(const int timeout, const msg_type search_type)
+shm_message_queue::message * shm_message_queue::wait_for_message(const int timeout, const msg_type search_type, const std::optional<uint64_t> & msg_nr)
 {
 	timespec ts { };
 	if (clock_gettime(CLOCK_REALTIME, &ts) == -1) {
@@ -117,9 +117,11 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 			assert(m->marker == 0xdeadbeef);
 			uint32_t length       = m->size;
 			size_t   total_length = PAD8(sizeof(message) + length);
+			uint64_t cur_msg_nr   = m->msg_nr;
 			assert(length > 0);
 
-			if (m->type == search_type || search_type == msg_any) {
+			if ((m->type == search_type || search_type == msg_any) &&
+				(msg_nr.has_value() == false || (msg_nr.has_value() == true && msg_nr.value() == cur_msg_nr))) {
 				message *copy = reinterpret_cast<message *>(new uint8_t[total_length]);
 				memcpy(copy, m, total_length);
 

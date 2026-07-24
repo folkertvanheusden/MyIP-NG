@@ -24,7 +24,7 @@ int main(int argc, char *argv[])
 	std::thread t1([&q_a, &total_recv, &total_recv_ok] {
 			printf("Thread 1 started\n");
 			for(;;) {
-				auto *p = reinterpret_cast<uint8_t *>(q_a.wait_for_message(10, shm_message_queue::msg_type(rand() % 3)));
+				auto *p = reinterpret_cast<uint8_t *>(q_a.wait_for_message(10, shm_message_queue::msg_type(rand() % 3), { }));
 				total_recv++;
 				total_recv_ok += !!p;
 			}
