@@ -127,7 +127,7 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 				memcpy(copy, m, total_length);
 
 				size_t left = end - cur - total_length;
-				assert(end - cur >= total_length);
+				assert(size_t(end - cur) >= total_length);
 				assert((long(cur) & 7) == 0);
 				assert((total_length & 7) == 0);
 				if (left)
@@ -170,6 +170,8 @@ bool shm_message_queue::send_message(const std::string & remote_identifier, mess
 	assert(length > 0);
 
 	m->msg_nr = ++get_shm->most_recent_msg_nr;
+	memset(m->sender, 0x00, sizeof(m->sender));
+	memcpy(m->sender, local_identifier.c_str(), local_identifier.size());
 
 	if (int err = pthread_mutex_lock(&get_shm->mutex); err != 0) {
 		if (err == EOWNERDEAD) {
