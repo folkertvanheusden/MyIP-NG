@@ -88,15 +88,19 @@ bool shm_message_queue::begin()
 shm_message_queue::message * shm_message_queue::wait_for_message(const int timeout, const msg_type search_type, const std::optional<uint64_t> & msg_nr)
 {
 	timespec ts { };
-	if (clock_gettime(CLOCK_REALTIME, &ts) == -1) {
-		DOLOG(logger::ll_error, "clock_gettime failed: %s", strerror(errno));
-		return nullptr;
-	}
-	ts.tv_sec  += timeout / 1000;
-	ts.tv_nsec += (timeout % 1000) * 1'000'000ll;
-	if (ts.tv_nsec >= 1'000'000'000) {
-		ts.tv_sec++;
-		ts.tv_nsec -= 1'000'000'000;
+
+	if (timeout >= 0) {
+		if (clock_gettime(CLOCK_REALTIME, &ts) == -1) {
+			DOLOG(logger::ll_error, "clock_gettime failed: %s", strerror(errno));
+			return nullptr;
+		}
+
+		ts.tv_sec  += timeout / 1000;
+		ts.tv_nsec += (timeout % 1000) * 1'000'000ll;
+		if (ts.tv_nsec >= 1'000'000'000) {
+			ts.tv_sec++;
+			ts.tv_nsec -= 1'000'000'000;
+		}
 	}
 
 	if (int err = pthread_mutex_lock(&get_shm->mutex); err != 0) {
@@ -145,14 +149,22 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 			assert((long(cur) & 7) == 0);
 		}
 
-		if (int err = pthread_cond_timedwait(&get_shm->condition, &get_shm->mutex, &ts); err != 0) {
-			// either an error or timeout
-			// unlock when timed out
-			if (err != ETIMEDOUT)
-				DOLOG(logger::ll_error, "pthread_cond_timedwait failed: %s", strerror(err));
-			else if (int err = pthread_mutex_unlock(&get_shm->mutex); err != 0)
-				DOLOG(logger::ll_error, "pthread_mutex_unlock failed: %s", strerror(err));
-			break;
+		if (timeout >= 0) {
+			if (int err = pthread_cond_timedwait(&get_shm->condition, &get_shm->mutex, &ts); err != 0) {
+				// either an error or timeout
+				// unlock when timed out
+				if (err != ETIMEDOUT)
+					DOLOG(logger::ll_error, "pthread_cond_timedwait failed: %s", strerror(err));
+				else if (int err = pthread_mutex_unlock(&get_shm->mutex); err != 0)
+					DOLOG(logger::ll_error, "pthread_mutex_unlock failed: %s", strerror(err));
+				break;
+			}
+		}
+		else {
+			if (int err = pthread_cond_wait(&get_shm->condition, &get_shm->mutex); err != 0) {
+				DOLOG(logger::ll_error, "pthread_cond_wait failed: %s", strerror(err));
+				break;
+			}
 		}
 	}
 
