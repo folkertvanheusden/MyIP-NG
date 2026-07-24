@@ -13,7 +13,8 @@ class shm_message_queue
 public:
 	struct shared_memory {
 		pthread_mutex_t mutex;
-		pthread_cond_t  condition;
+		pthread_cond_t  condition_put;
+		pthread_cond_t  condition_get;
 		size_t          total_size;
 		size_t          filled;
 		uint64_t        most_recent_msg_nr;
@@ -43,5 +44,5 @@ public:
 	bool      begin           ();
 
 	message * wait_for_message(const int timeout /* milliseconds */, const msg_type type, const std::optional<uint64_t> & msg_nr);
-	bool      send_message    (const std::string & remote_identifier, message *const m);
+	bool      send_message    (const std::string & remote_identifier, message *const m, const bool blocking);
 };

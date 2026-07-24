@@ -48,7 +48,7 @@ int main(int argc, char *argv[])
 			for(;;) {
 				m->size = 1 + (rand() % (queue_size / 8));
 				m->type = rand() & 1 ? shm_message_queue::msg_new : shm_message_queue::msg_reply;
-				bool rc_send = q_b.send_message(identifier_a, m);
+				bool rc_send = q_b.send_message(identifier_a, m, true);
 				total_sent++;
 				total_sent_ok += rc_send;
 			}

@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 
 #include "log.h"
 #include "shm.h"
@@ -66,7 +67,8 @@ bool shm_message_queue::begin()
 		pthread_condattr_t cond_attr { };
 		pthread_condattr_init(&cond_attr);
 		pthread_condattr_setpshared(&cond_attr, PTHREAD_PROCESS_SHARED);
-		pthread_cond_init(&get_shm->condition, &cond_attr);
+		pthread_cond_init(&get_shm->condition_put, &cond_attr);
+		pthread_cond_init(&get_shm->condition_get, &cond_attr);
 		pthread_condattr_destroy(&cond_attr);
 
 		pthread_mutexattr_t mutex_attr { };
@@ -90,11 +92,14 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 
 	if (timeout >= 0) {
 		// the man-page of pthread_cond_timedwait says explicitly to use gettimeofday here
+		timeval tv { };
 		if (gettimeofday(&tv, nullptr) == -1) {
 			DOLOG(logger::ll_error, "gettimeofday failed: %s", strerror(errno));
 			return nullptr;
 		}
 
+		ts.tv_sec   = tv.tv_sec;
+		ts.tv_nsec  = tv.tv_usec * 1000;
 		ts.tv_sec  += timeout / 1000;
 		ts.tv_nsec += (timeout % 1000) * 1'000'000;
 		while (ts.tv_nsec >= 1'000'000'000) {
@@ -139,6 +144,9 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 				assert(get_shm->filled >= total_length);
 				get_shm->filled -= total_length;
 
+				if (int err = pthread_cond_broadcast(&get_shm->condition_get); err != 0)
+					DOLOG(logger::ll_error, "pthread_cond_signal failed: %s", strerror(err));
+
 				if (int err = pthread_mutex_unlock(&get_shm->mutex); err != 0)
 					DOLOG(logger::ll_error, "pthread_mutex_unlock failed: %s", strerror(err));
 
@@ -150,7 +158,7 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 		}
 
 		if (timeout >= 0) {
-			if (int err = pthread_cond_timedwait(&get_shm->condition, &get_shm->mutex, &ts); err != 0) {
+			if (int err = pthread_cond_timedwait(&get_shm->condition_put, &get_shm->mutex, &ts); err != 0) {
 				// either an error or timeout
 				// unlock when timed out
 				if (err != ETIMEDOUT)
@@ -161,7 +169,7 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 			}
 		}
 		else {
-			if (int err = pthread_cond_wait(&get_shm->condition, &get_shm->mutex); err != 0) {
+			if (int err = pthread_cond_wait(&get_shm->condition_put, &get_shm->mutex); err != 0) {
 				DOLOG(logger::ll_error, "pthread_cond_wait failed: %s", strerror(err));
 				break;
 			}
@@ -171,7 +179,7 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 	return nullptr;
 }
 
-bool shm_message_queue::send_message(const std::string & remote_identifier, message *const m)
+bool shm_message_queue::send_message(const std::string & remote_identifier, message *const m, const bool blocking)
 {
 	uint32_t length            = m->size;
 	size_t   total_msg_length  = sizeof(message) + length;
@@ -196,19 +204,28 @@ bool shm_message_queue::send_message(const std::string & remote_identifier, mess
 		}
 	}
 
-	if (get_shm->total_size >= get_shm->filled + padded_msg_length) {
-		memcpy(&get_shm->data[get_shm->filled], m, total_msg_length);
-		get_shm->filled += padded_msg_length;
+	for(;;) {
+		if (get_shm->total_size >= get_shm->filled + padded_msg_length) {
+			memcpy(&get_shm->data[get_shm->filled], m, total_msg_length);
+			get_shm->filled += padded_msg_length;
 
-		if (int err = pthread_cond_broadcast(&get_shm->condition); err != 0) {
-			DOLOG(logger::ll_error, "pthread_cond_signal failed: %s", strerror(err));
+			if (int err = pthread_cond_broadcast(&get_shm->condition_put); err != 0)
+				DOLOG(logger::ll_error, "pthread_cond_signal failed: %s", strerror(err));
+			else
+				ok = true;
+			break;
 		}
 		else {
-			ok = true;
+			if (!blocking) {
+				DOLOG(logger::ll_warning, "queue for \"%s\" full, dropping message", remote_identifier.c_str());
+				break;
+			}
+
+			if (int err = pthread_cond_wait(&get_shm->condition_get, &get_shm->mutex); err != 0) {
+				DOLOG(logger::ll_error, "pthread_cond_wait failed: %s", strerror(err));
+				break;
+			}
 		}
-	}
-	else {
-		DOLOG(logger::ll_warning, "queue for \"%s\" full, dropping message", remote_identifier.c_str());
 	}
 
 	if (int err = pthread_mutex_unlock(&get_shm->mutex); err != 0) {
