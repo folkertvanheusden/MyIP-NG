@@ -188,7 +188,7 @@ bool shm_message_queue::send_message(const std::string & remote_identifier, mess
 		memcpy(&get_shm->data[get_shm->filled], m, total_msg_length);
 		get_shm->filled += padded_msg_length;
 
-		if (int err = pthread_cond_signal(&get_shm->condition); err != 0) {
+		if (int err = pthread_cond_broadcast(&get_shm->condition); err != 0) {
 			DOLOG(logger::ll_error, "pthread_cond_signal failed: %s", strerror(err));
 		}
 		else {
