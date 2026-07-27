@@ -14,12 +14,19 @@ add_compile_options(-Wall -pedantic)
 #add_compile_options(-fsanitize=address,undefined)
 #add_link_options(-fsanitize=address,undefined)
 
-add_executable(shm_test
-	log.cpp
+add_library(shm
 	shm.cpp
+)
+
+add_library(log
+	log.cpp
+)
+
+add_executable(shm_test
 	shm_test.cpp
-	time.cpp
 	)
+
+target_link_libraries(shm_test shm log)
 
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
