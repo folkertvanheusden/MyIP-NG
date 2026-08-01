@@ -26,9 +26,21 @@ add_executable(shm_test
 	shm_test.cpp
 	)
 
+add_executable(tap_server
+	tap_server.cpp
+	)
+
 target_link_libraries(shm_test shm log)
+target_link_libraries(tap_server shm log)
 
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 find_package(Threads)
 target_link_libraries(shm_test Threads::Threads)
+
+include(FindPkgConfig)
+
+pkg_check_modules(INI REQUIRED iniparser)
+target_link_libraries(tap_server ${INI_LIBRARIES})
+target_include_directories(tap_server PUBLIC ${INI_INCLUDE_DIRS})
+target_compile_options(tap_server PUBLIC ${INI_CFLAGS_OTHER})

@@ -6,7 +6,7 @@
 #include <string>
 
 
-constexpr const int max_id_length = 16;
+constexpr const int max_id_length = 32;
 
 class shm_message_queue
 {
