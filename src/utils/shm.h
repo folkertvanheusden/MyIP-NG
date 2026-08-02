@@ -18,17 +18,18 @@ public:
 		size_t          total_size;
 		size_t          filled;
 		uint64_t        most_recent_msg_nr;
-		uint8_t         data[1];
+		uint8_t         data[0];
 	};
 
 	enum msg_type { msg_new = 1, msg_reply = 2, msg_any = 0 /* msg_any only as parameter to wait */ };
 	struct message {
+		// TODO network byte order
 		uint32_t        size;  // by user
-		msg_type        type;  // by user
+		uint32_t        type;  // msg_type, by user
 		uint64_t        msg_nr;  // set by shm.cpp
 		char            sender[max_id_length];  // set by shm.cpp
-		uint8_t         data[1];  // by user
-	};
+		uint8_t         data[0];  // by user
+	} __attribute__((__packed__));
 
 private:
 	const std::string local_identifier;

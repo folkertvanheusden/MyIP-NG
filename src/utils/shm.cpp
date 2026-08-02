@@ -180,6 +180,7 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 
 bool shm_message_queue::send_message(const std::string & remote_identifier, message *const m, const bool blocking)
 {
+	assert(m->size > 0);
 	int put_segment = shm_open(remote_identifier.c_str(), O_RDWR, 0600);
 	if (put_segment == -1) {
 		DOLOG(logger::ll_info, "shm_open(%s) failed: %s (remote not up yet?)", remote_identifier.c_str(), strerror(errno));
@@ -263,5 +264,5 @@ bool shm_message_queue::send_message(const std::string & remote_identifier, mess
 
 shm_message_queue::message *allocate_shm_message(const size_t size)
 {
-	return reinterpret_cast<shm_message_queue::message *>(calloc(1, sizeof(shm_message_queue::message) + size - 1 /* data[1]! */));
+	return reinterpret_cast<shm_message_queue::message *>(calloc(1, sizeof(shm_message_queue::message) + size));
 }
