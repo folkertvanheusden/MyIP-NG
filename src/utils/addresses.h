@@ -35,6 +35,12 @@ struct addr {
 		a_len = data_len;
 	}
 
+	addr(const addr & in) {
+		a_len = in.a_len;
+		a = new uint8_t[a_len];
+		memcpy(a, in.a, a_len);
+	}
+
 	virtual ~addr() {
 		delete [] a;
 	}
@@ -62,6 +68,8 @@ struct addr {
 	}
 
 	void get(uint8_t *const p) const {
+		assert(a);
+		assert(a_len);
 		memcpy(p, a, a_len);
 	}
 };
