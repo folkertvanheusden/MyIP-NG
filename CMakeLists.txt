@@ -27,6 +27,7 @@ add_executable(shm_test
 	)
 
 add_executable(tap_server
+	shm_message.cpp
 	tap_server.cpp
 	)
 
