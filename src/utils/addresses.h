@@ -29,6 +29,11 @@ struct addr {
 		}
 	}
 
+	addr(const uint8_t data[], const size_t data_len) {
+		a = new uint8_t[data_len];
+		memcpy(a, data, data_len);
+	}
+
 	virtual ~addr() {
 		delete [] a;
 	}
