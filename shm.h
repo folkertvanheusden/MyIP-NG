@@ -23,11 +23,11 @@ public:
 
 	enum msg_type { msg_new = 1, msg_reply = 2, msg_any = 0 /* msg_any only as parameter to wait */ };
 	struct message {
-		uint32_t        size;
-		msg_type        type;
-		uint64_t        msg_nr;
-		char            sender[max_id_length];
-		uint8_t         data[1];
+		uint32_t        size;  // by user
+		msg_type        type;  // by user
+		uint64_t        msg_nr;  // set by shm.cpp
+		char            sender[max_id_length];  // set by shm.cpp
+		uint8_t         data[1];  // by user
 	};
 
 private:
