@@ -16,10 +16,10 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 
-#include "gen.h"
-#include "log.h"
-#include "shm.h"
-#include "shm_message.h"
+#include "utils/gen.h"
+#include "utils/log.h"
+#include "utils/shm.h"
+#include "utils/shm_message.h"
 
 
 constexpr const uint8_t bc_addr[] { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };

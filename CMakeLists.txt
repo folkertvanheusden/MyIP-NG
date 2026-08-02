@@ -15,26 +15,26 @@ add_compile_options(-Wall -pedantic)
 #add_link_options(-fsanitize=address,undefined)
 
 add_library(shm
-	shm.cpp
+	src/utils/shm.cpp
 )
 
 add_library(log
-	log.cpp
+	src/utils/log.cpp
 )
 
 add_executable(shm_test
-	shm_test.cpp
+	src/shm_test.cpp
 	)
 
 add_executable(tap_server
-	shm_message.cpp
-	tap_server.cpp
+	src/utils/shm_message.cpp
+	src/tap_server.cpp
 	)
 
 add_executable(arp_server
-	arp_server.cpp
-	shm_message.cpp
-	str_utils.cpp
+	src/arp_server.cpp
+	src/utils/shm_message.cpp
+	src/utils/str.cpp
 	)
 
 target_link_libraries(shm_test shm log)

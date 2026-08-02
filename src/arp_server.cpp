@@ -7,12 +7,12 @@
 #include <thread>
 #include <iniparser/iniparser.h>
 
-#include "addresses.h"
-#include "gen.h"
-#include "log.h"
-#include "shm.h"
-#include "shm_message.h"
-#include "str_utils.h"
+#include "utils/addresses.h"
+#include "utils/gen.h"
+#include "utils/log.h"
+#include "utils/shm.h"
+#include "utils/shm_message.h"
+#include "utils/str.h"
 
 
 std::atomic_bool stop_flag { false };

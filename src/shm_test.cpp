@@ -3,8 +3,8 @@
 #include <thread>
 #include <unistd.h>
 
-#include "log.h"
-#include "shm.h"
+#include "utils/log.h"
+#include "utils/shm.h"
 
 
 const std::string identifier_a = "1234-test-a";
