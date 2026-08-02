@@ -46,3 +46,5 @@ public:
 	message * wait_for_message(const int timeout /* milliseconds */, const msg_type type, const std::optional<uint64_t> & msg_nr);
 	bool      send_message    (const std::string & remote_identifier, message *const m, const bool blocking);
 };
+
+shm_message_queue::message *allocate_shm_message(const size_t size);
