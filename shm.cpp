@@ -131,7 +131,7 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 
 			if ((m->type == search_type || search_type == msg_any) &&
 				(msg_nr.has_value() == false || (msg_nr.has_value() == true && msg_nr.value() == cur_msg_nr))) {
-				message *copy = reinterpret_cast<message *>(new uint8_t[total_length]);
+				message *copy = reinterpret_cast<message *>(malloc(total_length));
 				memcpy(copy, m, total_length);
 
 				size_t left = end - cur - total_length;

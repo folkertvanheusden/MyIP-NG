@@ -29,6 +29,7 @@ int main(int argc, char *argv[])
 				auto *p = reinterpret_cast<uint8_t *>(q_a.wait_for_message(10, shm_message_queue::msg_type(rand() % 3), { }));
 				total_recv++;
 				total_recv_ok += !!p;
+				free(p);
 			}
 		});
 
