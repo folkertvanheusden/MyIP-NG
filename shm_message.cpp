@@ -36,3 +36,42 @@ shm_message_queue::message * wrap_message(const size_t from_len, const uint8_t *
 
 	return msg;
 }
+
+bool unwrap_message(const shm_message_queue::message *const m,
+		    size_t *const from_len, const uint8_t **const from,
+                    size_t *const to_len,   const uint8_t **const to,
+                    size_t *const pl_len,   const uint8_t **const pl)
+{
+	const uint8_t *payload = m->data;
+	size_t         offset  = 0;
+
+	if (offset + 2 >= m->size)
+		return false;
+	*from_len  =  payload[offset++] << 8;
+	*from_len +=  payload[offset++];
+	if (offset + *from_len >= m->size)
+		return false;
+	*from      = &payload[offset];
+	offset += *from_len;
+
+	if (offset + 2 >= m->size)
+		return false;
+	*to_len  =  payload[offset++] << 8;
+	*to_len +=  payload[offset++];
+	if (offset + *to_len >= m->size)
+		return false;
+	*to      = &payload[offset];
+	offset += *to_len;
+
+	if (offset + 4 >= m->size)
+		return false;
+	*pl_len  =  payload[offset++] << 24;
+	*pl_len  =  payload[offset++] << 16;
+	*pl_len  =  payload[offset++] <<  8;
+	*pl_len +=  payload[offset++];
+	if (offset + *pl_len > m->size)  // not a typo
+		return false;
+	*pl      = &payload[offset];
+
+	return true;
+}
