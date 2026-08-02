@@ -1,0 +1,51 @@
+#pragma once
+
+#include <cstdint>
+#include <cstring>
+
+#include "str_utils.h"
+
+
+constexpr const uint8_t bc_addr[] { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+
+struct addr {
+	uint8_t *a     { nullptr };
+	size_t   a_len { 0       };
+
+	addr() {  // for comparator
+	}
+
+	addr(const std::string & what, const std::string & seperator, const bool is_hex) {
+		auto parts = split(what, seperator);
+		a_len = parts.size();
+		a = new uint8_t[a_len];
+		if (is_hex) {
+			for(size_t i=0; i<a_len; i++)
+				a[i] = std::stoi(parts[i], nullptr, 16);
+		}
+		else {
+			for(size_t i=0; i<a_len; i++)
+				a[i] = std::stoi(parts[i]);
+		}
+	}
+
+	virtual ~addr() {
+		delete [] a;
+	}
+
+	addr & operator=(const addr & input) {
+		a = new uint8_t[input.a_len];
+		memcpy(a, input.a, input.a_len);
+		a_len = input.a_len;
+		return *this;
+	}
+
+	bool operator()(const addr & lhs, const addr & rhs) const
+	{
+		assert(lhs.a_len == rhs.a_len);
+		return memcmp(lhs.a, rhs.a, a_len);
+	}
+};
+
+typedef addr addr_ip4;
+typedef addr addr_mac;
