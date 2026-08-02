@@ -249,7 +249,7 @@ void run_out(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_a
 
 void announcer(shm_message_queue *const shm, const uint8_t mac_addr[6], const std::string & announce_mac_name)
 {
-	const std::string msg = std::format("setmac={0:x}:{1:x}:{2:x}:{3:x}:{4:x}:{5:x}",
+	const std::string msg = std::format("setmac={0:02x}:{1:02x}:{2:02x}:{3:02x}:{4:02x}:{5:02x}",
 				mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
 	shm_message_queue::message m { };
 	m.type = shm_message_queue::msg_new;
