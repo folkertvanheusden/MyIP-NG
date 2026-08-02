@@ -179,7 +179,7 @@ void run_in(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_ad
 		auto *msg = wrap_message(6, &buffer[6],
                                          6, &buffer[0],
                                          size - 14, &buffer[14],
-					 false);  // FIXME handle vlan
+					 { });  // FIXME handle vlan
 
 		if (shm->send_message(it->second, msg, false))
 			DOLOG(logger::ll_debug, "Message pushed to shared memory of \"%s\"", it->second.c_str());
@@ -193,7 +193,7 @@ void run_in(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_ad
 void run_out(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_addr[6], const std::map<std::string, uint16_t> & mappings_out)
 {
 	while(!stop_flag) {
-		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
+		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
 		if (!m)
 			continue;
 
@@ -239,6 +239,9 @@ void run_out(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_a
 		if (write(tap_fd, packet, packet_length) != ssize_t(packet_length)) {
 			DOLOG(logger::ll_debug, "Problem sending packet: %s", strerror(errno));
 			free(m);
+		}
+		else {
+			DOLOG(logger::ll_debug, "Sent packet of %zu bytes for %s", packet_length, m->sender);
 		}
 
 		delete [] packet;
