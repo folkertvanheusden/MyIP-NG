@@ -251,10 +251,10 @@ void announcer(shm_message_queue *const shm, const uint8_t mac_addr[6], const st
 {
 	const std::string msg = std::format("setmac={0:02x}:{1:02x}:{2:02x}:{3:02x}:{4:02x}:{5:02x}",
 				mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-	shm_message_queue::message m { };
-	m.type = shm_message_queue::msg_new;
-	m.size = msg.size();
-	memcpy(m.data, msg.c_str(), m.size);
+	shm_message_queue::message *m = allocate_shm_message(msg.size());
+	m->type = shm_message_queue::msg_new;
+	m->size = msg.size();
+	memcpy(m->data, msg.c_str(), m->size);
 
 	int i = 0;
 	while(!stop_flag) {
@@ -266,8 +266,10 @@ void announcer(shm_message_queue *const shm, const uint8_t mac_addr[6], const st
 
 		// announce-mac-name to ARP process
 		DOLOG(logger::ll_debug, "Announce \"%s\" to %s", msg.c_str(), announce_mac_name.c_str());
-		shm->send_message(announce_mac_name, &m, false);
+		shm->send_message(announce_mac_name, m, false);
 	}
+
+	free(m);
 }
 
 void run(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_addr[6],
