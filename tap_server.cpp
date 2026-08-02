@@ -51,7 +51,7 @@ int open_tap(const std::string & device_name, const int mtu_size)
 	}
 
 	ifreq ifr_tap { };
-	ifr_tap.ifr_flags = IFF_TAP | IFF_NO_PI | IFF_UP;
+	ifr_tap.ifr_flags = IFF_TAP | IFF_NO_PI;
 	set_ifr_name(&ifr_tap, device_name);
 	if (ioctl(fd, TUNSETIFF, &ifr_tap) == -1) {
 		DOLOG(logger::ll_error, "ioctl TUNSETIFF(%s) failed: %s", device_name.c_str(), strerror(errno));
@@ -157,7 +157,9 @@ void run(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_addr[
 			continue;
 		}
 
-		DOLOG(logger::ll_debug, "frame of %zu bytes received", size);
+		DOLOG(logger::ll_debug, "frame of %zu bytes received for %02x:%02x:%02x:%02x:%02x:%02x",
+				size,
+				buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5]);
 
 		// for us? or broadcast/multicast?
 		if ((buffer[0] & 1) == 0 &&  // multicast
@@ -174,9 +176,12 @@ void run(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_addr[
 
 		auto *msg = wrap_message(6, &buffer[6],
                                          6, &buffer[0],
-                                         size - 14, &buffer[14]);  // FIXME handle vlan
+                                         size - 14, &buffer[14],
+					 false);  // FIXME handle vlan
 
-		if (!shm->send_message(it->second, msg, false))
+		if (shm->send_message(it->second, msg, false))
+			DOLOG(logger::ll_debug, "Message pushed to shared memory of \"%s\"", it->second.c_str());
+		else
 			DOLOG(logger::ll_warning, "Could not push message to SHM");
 
 		free(msg);
@@ -234,6 +239,11 @@ int main(int argc, char *argv[])
 	signal(SIGINT, sig_handler);
 
 	shm_message_queue shm(name, msg_queue_size);
+	if (shm.begin() == false) {
+		fprintf(stderr, "Cannot initialize shared memory segment\n");
+		return 1;
+	}
+
 	int               tap_fd = open_tap(device_name, mtu_size);
 	uint8_t           mac_addr[6] { };
 	get_local_mac(device_name, mac_addr);

@@ -5,7 +5,8 @@
 
 shm_message_queue::message * wrap_message(const size_t from_len, const uint8_t *const from,
                                           const size_t to_len,   const uint8_t *const to,
-                                          const size_t pl_len,   const uint8_t *const pl)
+                                          const size_t pl_len,   const uint8_t *const pl,
+					  const bool   is_reply)
 {
 	size_t   total_pl_length = 2 + from_len + 2 + to_len + 4 + pl_len;
 	size_t   total_length    = sizeof(shm_message_queue::message) + total_pl_length;
@@ -14,6 +15,7 @@ shm_message_queue::message * wrap_message(const size_t from_len, const uint8_t *
 	size_t   offset          = 0;
 
 	msg->size = total_pl_length;
+	msg->type = is_reply ? shm_message_queue::msg_reply : shm_message_queue::msg_new;
 
 	payload[offset++] = to_len >> 8;
 	payload[offset++] = to_len;
