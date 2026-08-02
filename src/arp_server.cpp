@@ -129,10 +129,11 @@ void run_in(shm_message_queue *const shm,
 					mappings_in.get(from);
 					uint8_t to  [6] { };
 					SHA.get(to);
+					auto temp_msg_nr = m->msg_nr;
 					shm_message_queue::message *m_out = wrap_message(sizeof from, from,
 							sizeof to, to,
 							sizeof(payload_out), payload_out,
-							m->msg_nr);
+							temp_msg_nr);
 					shm->send_message(m->sender, m_out, false);
 
 					free(m_out);
