@@ -7,12 +7,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 add_definitions("-D_FILE_OFFSET_BITS=64")
 
-set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_BUILD_TYPE RelWithDebInfo)
 
 add_compile_options(-Wall -pedantic)
 
-add_compile_options(-fsanitize=address,undefined)
-add_link_options(-fsanitize=address,undefined)
+#add_compile_options(-fsanitize=address,undefined)
+#add_link_options(-fsanitize=address,undefined)
 
 add_library(shm
 	src/utils/shm.cpp
@@ -38,6 +38,12 @@ add_executable(tap_server
 	src/tap_server.cpp
 	)
 
+add_executable(promiscuous_server
+	src/utils/net.cpp
+	src/utils/shm_message.cpp
+	src/promisc_server.cpp
+	)
+
 add_executable(arp_server
 	src/arp_server.cpp
 	src/utils/net.cpp
@@ -48,6 +54,7 @@ add_executable(arp_server
 target_link_libraries(shm_test shm log)
 target_link_libraries(shm_test2 shm log)
 target_link_libraries(arp_server shm log)
+target_link_libraries(promiscuous_server shm log)
 target_link_libraries(tap_server shm log)
 
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
@@ -58,9 +65,12 @@ target_link_libraries(shm_test Threads::Threads)
 include(FindPkgConfig)
 
 pkg_check_modules(INI REQUIRED iniparser)
-target_link_libraries(tap_server ${INI_LIBRARIES})
-target_include_directories(tap_server PUBLIC ${INI_INCLUDE_DIRS})
-target_compile_options(tap_server PUBLIC ${INI_CFLAGS_OTHER})
 target_link_libraries(arp_server ${INI_LIBRARIES})
 target_include_directories(arp_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(arp_server PUBLIC ${INI_CFLAGS_OTHER})
+target_link_libraries(promiscuous_server ${INI_LIBRARIES})
+target_include_directories(promiscuous_server PUBLIC ${INI_INCLUDE_DIRS})
+target_compile_options(promiscuous_server PUBLIC ${INI_CFLAGS_OTHER})
+target_link_libraries(tap_server ${INI_LIBRARIES})
+target_include_directories(tap_server PUBLIC ${INI_INCLUDE_DIRS})
+target_compile_options(tap_server PUBLIC ${INI_CFLAGS_OTHER})
