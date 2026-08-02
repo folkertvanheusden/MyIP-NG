@@ -60,6 +60,10 @@ struct addr {
 		}
 		return out;
 	}
+
+	void get(uint8_t *const p) const {
+		memcpy(p, a, a_len);
+	}
 };
 
 typedef addr addr_ip4;
