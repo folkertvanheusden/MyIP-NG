@@ -31,7 +31,14 @@ add_executable(tap_server
 	tap_server.cpp
 	)
 
+add_executable(arp_server
+	arp_server.cpp
+	shm_message.cpp
+	str_utils.cpp
+	)
+
 target_link_libraries(shm_test shm log)
+target_link_libraries(arp_server shm log)
 target_link_libraries(tap_server shm log)
 
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
@@ -45,3 +52,6 @@ pkg_check_modules(INI REQUIRED iniparser)
 target_link_libraries(tap_server ${INI_LIBRARIES})
 target_include_directories(tap_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(tap_server PUBLIC ${INI_CFLAGS_OTHER})
+target_link_libraries(arp_server ${INI_LIBRARIES})
+target_include_directories(arp_server PUBLIC ${INI_INCLUDE_DIRS})
+target_compile_options(arp_server PUBLIC ${INI_CFLAGS_OTHER})

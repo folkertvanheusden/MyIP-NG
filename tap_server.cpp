@@ -159,7 +159,7 @@ void run_in(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_ad
 			continue;
 		}
 
-		DOLOG(logger::ll_debug, "frame of %zu bytes received for %02x:%02x:%02x:%02x:%02x:%02x",
+		DOLOG(logger::ll_debug, "frame of %d bytes received for %02x:%02x:%02x:%02x:%02x:%02x",
 				size,
 				buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5]);
 
@@ -247,12 +247,38 @@ void run_out(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_a
 	}
 }
 
+void announcer(shm_message_queue *const shm, const uint8_t mac_addr[6], const std::string & announce_mac_name)
+{
+	const std::string msg = std::format("setmac={0:x}:{1:x}:{2:x}:{3:x}:{4:x}:{5:x}",
+				mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+	shm_message_queue::message m { };
+	m.type = shm_message_queue::msg_new;
+	m.size = msg.size();
+	memcpy(m.data, msg.c_str(), m.size);
+
+	int i = 0;
+	while(!stop_flag) {
+		if (++i < 10) {
+			usleep(SLEEP_INTERVAL_MS * 1000);
+			continue;
+		}
+		i = 0;
+
+		// announce-mac-name to ARP process
+		DOLOG(logger::ll_debug, "Announce \"%s\" to %s", msg.c_str(), announce_mac_name.c_str());
+		shm->send_message(announce_mac_name, &m, false);
+	}
+}
+
 void run(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_addr[6],
 		const std::map<uint16_t, std::string> & mappings_in,
-		const std::map<std::string, uint16_t> & mappings_out)
+		const std::map<std::string, uint16_t> & mappings_out,
+		const std::string & announce_mac_name)
 {
 	std::thread rx([&] { run_in (shm, tap_fd, mac_addr, mappings_in ); });
 	std::thread tx([&] { run_out(shm, tap_fd, mac_addr, mappings_out); });
+	std::thread announce([shm, mac_addr, announce_mac_name] { announcer(shm, mac_addr, announce_mac_name); });
+	announce.join();
 	tx.join();
 	rx.join();
 }
@@ -291,6 +317,11 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"dev\" under \"specific\" missing\n");
 		return 1;
 	}
+	std::string announce_mac_name = iniparser_getstring(d, "specific:announce-mac-name", "");
+	if (announce_mac_name.empty()) {
+		fprintf(stderr, "\"announce-mac-name\" under \"specific\" missing\n");
+		return 1;
+	}
 	int msg_queue_size = iniparser_getint(d, "specific:msg-queue-size", 0);
 	if (msg_queue_size == 0) {
 		msg_queue_size = 16384;
@@ -319,7 +350,7 @@ int main(int argc, char *argv[])
 	get_local_mac(device_name, mac_addr);
 	set_mtu_size (device_name, mtu_size);
 
-	run(&shm, tap_fd, mac_addr, mappings_in, mappings_out);
+	run(&shm, tap_fd, mac_addr, mappings_in, mappings_out, announce_mac_name);
 
 	return 0;
 }
