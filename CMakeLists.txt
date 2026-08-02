@@ -33,6 +33,7 @@ add_executable(tap_server
 
 add_executable(arp_server
 	src/arp_server.cpp
+	src/utils/net.cpp
 	src/utils/shm_message.cpp
 	src/utils/str.cpp
 	)

@@ -10,6 +10,7 @@
 #include "utils/addresses.h"
 #include "utils/gen.h"
 #include "utils/log.h"
+#include "utils/net.h"
 #include "utils/shm.h"
 #include "utils/shm_message.h"
 #include "utils/str.h"
@@ -49,22 +50,81 @@ void run_in(shm_message_queue *const shm,
 			continue;
 		}
 
-		if (pl_len == 0) {
-			DOLOG(logger::ll_warning, "Empty payload");
-			free(m);
-			continue;
+		if (pl_len < 28) {
+			DOLOG(logger::ll_debug, "arp payload < 28 bytes");
+		}
+		else if (uint16_t hw_type = get_uint16(pl + 0); hw_type != 1) {  // Ethernet?
+			DOLOG(logger::ll_debug, "arp hardware type is not Ethernet (%u)", hw_type);
+		}
+		else if (uint16_t proto_type = get_uint16(pl + 2); proto_type != 0x0800) {  // IPv4?
+			DOLOG(logger::ll_debug, "arp protocol type is not IPv4 (%04x)", proto_type);
+		}
+		else if (uint8_t hw_length = pl[4]; hw_length != 6) {  // Ethernet?
+			DOLOG(logger::ll_debug, "arp hardware length != 6 (%u)", hw_length);
+		}
+		else if (uint8_t proto_length = pl[5]; proto_length != 4) {  // IPv4?
+			DOLOG(logger::ll_debug, "arp protocol length != 4 (%u)", proto_length);
+		}
+		else {
+			addr_mac SHA(pl +  8, 6);
+			addr_ip4 SPA(pl + 14, 4);
+			addr_mac THA(pl + 18, 6);
+			addr_ip4 TPA(pl + 24, 4);
+
+			uint16_t operation = get_uint16(pl + 6);
+
+			DOLOG(logger::ll_debug, "ARP%04x: THA: %s, SHA: %s, TPA: %s, SPA: %s",
+					operation,
+					THA.to_str(':', true ).c_str(), SHA.to_str(':', true ).c_str(),
+					TPA.to_str('.', false).c_str(), SPA.to_str('.', false).c_str());
+
+			if (operation == 1) {  // request
+					       // see if TPA is known
+				bool known = false;
+				{
+					std::unique_lock<std::mutex> lck(ip4_lock);
+					auto it = mappings_out.find(TPA);
+					if (it != mappings_out.end())
+						known = true;
+				}
+
+				if (known) {
+					DOLOG(logger::ll_debug, "arp sending reply with MAC address %s", mappings_in.to_str(':', true).c_str());
+
+					uint8_t payload_out[28];
+					memcpy(payload_out, pl, 28);
+					SHA.get(&payload_out[18]);  // set THA to SHA
+					// this is a reply
+					payload_out[6] = 0;
+					payload_out[7] = 2;
+					// MAC address
+					mappings_in.get(&payload_out[8]);
+					// swap IP4 addresses
+					for(int i=0; i<4; i++)
+						std::swap(payload_out[i + 14], payload_out[i + 24]);
+
+					// push to Ethernet
+					auto *m_out   = allocate_shm_message(sizeof(payload_out));
+					m_out->type   = shm_message_queue::msg_reply;
+					m_out->size   = sizeof(payload_out);
+					m_out->msg_nr = m->msg_nr;
+					memcpy(m_out->data, payload_out, m_out->size);
+
+					shm->send_message(m->sender, m_out, false);
+
+					free(m_out);
+				}
+				else {
+					DOLOG(logger::ll_debug, "Requested IP address (%s) not known", TPA.to_str('.', false).c_str());
+				}
+			}
+			else if (operation == 2) {  // reply
+			}
+			else {
+				DOLOG(logger::ll_debug, "arp unexpected operation (%u)", operation);
+			}
 		}
 
-#if 0
-		auto it = mappings_out.find(m->sender);
-		if (it == mappings_out.end()) {
-			DOLOG(logger::ll_debug, "No mapping for %s", m->sender);
-			free(m);
-			continue;
-		}
-
-		// TODO
-#endif
 		free(m);
 	}
 }
