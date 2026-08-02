@@ -32,6 +32,24 @@ void run_in(shm_message_queue *const shm,
 		if (!m)
 			continue;
 
+		{
+			std::unique_lock<std::mutex> lck(ip4_lock);
+			if (mappings_out.empty()) {
+				DOLOG(logger::ll_error, "No IP4 addresses known yet, dropping packet");
+				free(m);
+				continue;
+			}
+		}
+
+		{
+			std::unique_lock<std::mutex> lck(mac_lock);
+			if (mappings_in.a_len == 0) {
+				DOLOG(logger::ll_error, "No MAC address known yet, dropping packet");
+				free(m);
+				continue;
+			}
+		}
+
 		size_t         from_len = 0;
 		size_t         to_len   = 0;
 		size_t         pl_len   = 0;
@@ -98,18 +116,23 @@ void run_in(shm_message_queue *const shm,
 					payload_out[6] = 0;
 					payload_out[7] = 2;
 					// MAC address
-					mappings_in.get(&payload_out[8]);
+					{
+						std::unique_lock<std::mutex> lck(mac_lock);
+						mappings_in.get(&payload_out[8]);
+					}
 					// swap IP4 addresses
 					for(int i=0; i<4; i++)
 						std::swap(payload_out[i + 14], payload_out[i + 24]);
 
 					// push to Ethernet
-					auto *m_out   = allocate_shm_message(sizeof(payload_out));
-					m_out->type   = shm_message_queue::msg_reply;
-					m_out->size   = sizeof(payload_out);
-					m_out->msg_nr = m->msg_nr;
-					memcpy(m_out->data, payload_out, m_out->size);
-
+					uint8_t from[6] { };
+					mappings_in.get(from);
+					uint8_t to  [6] { };
+					SHA.get(to);
+					shm_message_queue::message *m_out = wrap_message(sizeof from, from,
+							sizeof to, to,
+							sizeof(payload_out), payload_out,
+							m->msg_nr);
 					shm->send_message(m->sender, m_out, false);
 
 					free(m_out);
@@ -235,6 +258,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Cannot initialize shared memory segment for configuration channel\n");
 		return 1;
 	}
+ip4_list.insert(addr("192.168.1.2", ".", false));
 
 	run(&shm, mac, m_in_lock, ip4_list, m_out_lock, &shm_cfg);
 
