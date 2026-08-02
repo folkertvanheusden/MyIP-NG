@@ -23,7 +23,6 @@ public:
 
 	enum msg_type { msg_new = 1, msg_reply = 2, msg_any = 0 /* msg_any only as parameter to wait */ };
 	struct message {
-		uint32_t        marker;
 		uint32_t        size;
 		msg_type        type;
 		uint64_t        msg_nr;

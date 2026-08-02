@@ -124,7 +124,6 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 		uint8_t *cur = &get_shm->data[0];
 		while(end - cur >= long(sizeof(message))) {
 			message *m      = reinterpret_cast<message *>(cur);
-			assert(m->marker == 0xdeadbeef);
 			uint32_t length       = m->size;
 			size_t   total_length = PAD8(sizeof(message) + length);
 			uint64_t cur_msg_nr   = m->msg_nr;
@@ -186,7 +185,6 @@ bool shm_message_queue::send_message(const std::string & remote_identifier, mess
 	bool     ok                = false;
 	size_t   padded_msg_length = PAD8(total_msg_length);
 
-	assert(m->marker == 0xdeadbeef);
 	assert(length > 0);
 
 	m->msg_nr = ++get_shm->most_recent_msg_nr;

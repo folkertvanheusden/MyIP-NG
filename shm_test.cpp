@@ -43,7 +43,6 @@ int main(int argc, char *argv[])
 			printf("Thread 2 started\n");
 			shm_message_queue::message *m = reinterpret_cast<shm_message_queue::message *>(new
 					uint8_t[queue_size - sizeof(shm_message_queue::shared_memory)]());
-			m->marker = 0xdeadbeef;
 
 			for(;;) {
 				m->size = 1 + (rand() % (queue_size / 8));

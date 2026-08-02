@@ -145,7 +145,7 @@ int main(int argc, char *argv[])
 
 	shm_message_queue shm(name, msg_queue_size);
 	int               tap_fd = open_tap(device_name, mtu_size);
-	uint8_t mac_addr[6] { };
+	uint8_t           mac_addr[6] { };
 	get_local_mac(device_name, mac_addr);
 	set_mtu_size (device_name, mtu_size);
 
