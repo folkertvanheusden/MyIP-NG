@@ -7,6 +7,7 @@
 #include <map>
 #include <poll.h>
 #include <string>
+#include <thread>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <iniparser/iniparser.h>
@@ -111,7 +112,7 @@ bool get_local_mac(const std::string & device_name, uint8_t mac_addr[6])
 	return true;
 }
 
-void load_mappings(std::map<uint16_t, std::string> *const mappings, const dictionary *const d)
+void load_mappings(std::map<uint16_t, std::string> *const mappings_in, std::map<std::string, uint16_t> *const mappings_out, const dictionary *const d)
 {
 	constexpr const char section_name[] = "mappings";
 	int n_keys = iniparser_getsecnkeys(d, section_name);
@@ -128,13 +129,14 @@ void load_mappings(std::map<uint16_t, std::string> *const mappings, const dictio
 			exit(1);
 		}
 		uint16_t    k   = std::stoi(col + 1, nullptr, 16);
-		mappings->insert({ k, v });
+		mappings_in ->insert({ k, v });
+		mappings_out->insert({ v, k });
 	}
 
 	delete [] keys;
 }
 
-void run(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_addr[6], const std::map<uint16_t, std::string> & mappings)
+void run_in(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_addr[6], const std::map<uint16_t, std::string> & mappings_in)
 {
 	pollfd  fds[]       = { { tap_fd, POLLIN, 0 } };
 	uint8_t buffer[65536] { };
@@ -168,8 +170,8 @@ void run(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_addr[
 			continue;
 
 		const uint16_t type = (buffer[12] << 8) | buffer[13];
-		auto           it   = mappings.find(type);
-		if (it == mappings.end()) {
+		auto           it   = mappings_in.find(type);
+		if (it == mappings_in.end()) {
 			DOLOG(logger::ll_debug, "No mapping for %04x", type);
 			continue;
 		}
@@ -186,6 +188,73 @@ void run(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_addr[
 
 		free(msg);
 	}
+}
+
+void run_out(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_addr[6], const std::map<std::string, uint16_t> & mappings_out)
+{
+	while(!stop_flag) {
+		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
+		if (!m)
+			continue;
+
+		size_t         from_len = 0;
+		size_t         to_len   = 0;
+		size_t         pl_len   = 0;
+		const uint8_t *from     = nullptr;
+		const uint8_t *to       = nullptr;
+		const uint8_t *pl       = nullptr;
+		if (unwrap_message(m, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
+			DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
+			free(m);
+			continue;
+		}
+
+		if (from_len != 6 || to_len != 6) {
+			DOLOG(logger::ll_error, "Unexpected address lengths!");
+			free(m);
+			continue;
+		}
+
+		if (pl_len == 0) {
+			DOLOG(logger::ll_warning, "Empty payload");
+			free(m);
+			continue;
+		}
+
+		auto it = mappings_out.find(m->sender);
+		if (it == mappings_out.end()) {
+			DOLOG(logger::ll_debug, "No mapping for %s", m->sender);
+			free(m);
+			continue;
+		}
+
+		size_t   packet_length = 6 + 6 + 2 + pl_len;
+		uint8_t *packet        = new uint8_t[packet_length];
+		memcpy(&packet[0], to,   6);
+		memcpy(&packet[6], from, 6);
+		packet[12] = it->second >> 8;
+		packet[13] = it->second;
+		memcpy(&packet[14], pl, pl_len);
+
+		if (write(tap_fd, packet, packet_length) != ssize_t(packet_length)) {
+			DOLOG(logger::ll_debug, "Problem sending packet: %s", strerror(errno));
+			free(m);
+		}
+
+		delete [] packet;
+
+		free(m);
+	}
+}
+
+void run(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_addr[6],
+		const std::map<uint16_t, std::string> & mappings_in,
+		const std::map<std::string, uint16_t> & mappings_out)
+{
+	std::thread rx([&] { run_in (shm, tap_fd, mac_addr, mappings_in ); });
+	std::thread tx([&] { run_out(shm, tap_fd, mac_addr, mappings_out); });
+	tx.join();
+	rx.join();
 }
 
 int main(int argc, char *argv[])
@@ -232,8 +301,9 @@ int main(int argc, char *argv[])
 		mtu_size = 1512;
 		fprintf(stderr, "Using default MTU size of %d bytes\n", mtu_size);
 	}
-	std::map<uint16_t, std::string> mappings;
-	load_mappings(&mappings, d);
+	std::map<uint16_t, std::string> mappings_in;
+	std::map<std::string, uint16_t> mappings_out;
+	load_mappings(&mappings_in, &mappings_out, d);
 	iniparser_freedict(d);
 
 	signal(SIGINT, sig_handler);
@@ -249,7 +319,7 @@ int main(int argc, char *argv[])
 	get_local_mac(device_name, mac_addr);
 	set_mtu_size (device_name, mtu_size);
 
-	run(&shm, tap_fd, mac_addr, mappings);
+	run(&shm, tap_fd, mac_addr, mappings_in, mappings_out);
 
 	return 0;
 }
