@@ -116,7 +116,7 @@ int main(int argc, char *argv[])
 	dictionary *d = iniparser_load(cfg_file.c_str());
 	for(int i=0; i<iniparser_getnsec(d); i++) {
 		std::string section_name = iniparser_getsecname(d, i);
-		if (section_name != "global" && section_name != "specific") {
+		if (section_name != "global" && section_name != "specific" && section_name != "mappings") {
 			fprintf(stderr, "Section \"%s\" in configuration file is unknown\n", section_name.c_str());
 			return 1;
 		}
@@ -131,14 +131,23 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"dev\" under \"specific\" missing\n");
 		return 1;
 	}
-	int msg_queue_size = iniparser_getint(d, "specific:msg-queue-size", 16384);
-	int mtu_size       = iniparser_getint(d, "specific:mtu-size",       1512 );
+	int msg_queue_size = iniparser_getint(d, "specific:msg-queue-size", 0);
+	if (msg_queue_size == 0) {
+		msg_queue_size = 16384;
+		fprintf(stderr, "Using default msg queue size of %d bytes\n", msg_queue_size);
+	}
+	int mtu_size       = iniparser_getint(d, "specific:mtu-size",       0);
+	if (mtu_size == 0) {
+		mtu_size = 1512;
+		fprintf(stderr, "Using default MTU size of %d bytes\n", mtu_size);
+	}
 	iniparser_freedict(d);
 
 	shm_message_queue shm(name, msg_queue_size);
 	int               tap_fd = open_tap(device_name, mtu_size);
 	uint8_t mac_addr[6] { };
 	get_local_mac(device_name, mac_addr);
+	set_mtu_size (device_name, mtu_size);
 
 	run(&shm, tap_fd, mac_addr);
 
