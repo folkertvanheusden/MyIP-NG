@@ -32,6 +32,7 @@ struct addr {
 	addr(const uint8_t data[], const size_t data_len) {
 		a = new uint8_t[data_len];
 		memcpy(a, data, data_len);
+		a_len = data_len;
 	}
 
 	virtual ~addr() {
@@ -45,10 +46,19 @@ struct addr {
 		return *this;
 	}
 
-	bool operator()(const addr & lhs, const addr & rhs) const
-	{
+	bool operator()(const addr & lhs, const addr & rhs) const {
 		assert(lhs.a_len == rhs.a_len);
 		return memcmp(lhs.a, rhs.a, a_len);
+	}
+
+	std::string to_str(const char splitter, const bool hex) const {
+		std::string out;
+		for(size_t i=0; i<a_len; i++) {
+			if (i)
+				out += splitter;
+			out += hex ? std::format("{0:x}", a[i]) : std::to_string(a[i]);
+		}
+		return out;
 	}
 };
 
