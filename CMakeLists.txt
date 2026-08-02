@@ -11,8 +11,8 @@ set(CMAKE_BUILD_TYPE Debug)
 
 add_compile_options(-Wall -pedantic)
 
-#add_compile_options(-fsanitize=address,undefined)
-#add_link_options(-fsanitize=address,undefined)
+add_compile_options(-fsanitize=address,undefined)
+add_link_options(-fsanitize=address,undefined)
 
 add_library(shm
 	src/utils/shm.cpp
@@ -26,7 +26,14 @@ add_executable(shm_test
 	src/shm_test.cpp
 	)
 
+add_executable(shm_test2
+	src/shm_test2.cpp
+	src/utils/net.cpp
+	src/utils/shm_message.cpp
+	)
+
 add_executable(tap_server
+	src/utils/net.cpp
 	src/utils/shm_message.cpp
 	src/tap_server.cpp
 	)
@@ -39,6 +46,7 @@ add_executable(arp_server
 	)
 
 target_link_libraries(shm_test shm log)
+target_link_libraries(shm_test2 shm log)
 target_link_libraries(arp_server shm log)
 target_link_libraries(tap_server shm log)
 
