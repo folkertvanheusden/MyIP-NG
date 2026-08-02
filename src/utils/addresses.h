@@ -56,7 +56,7 @@ struct addr {
 		for(size_t i=0; i<a_len; i++) {
 			if (i)
 				out += splitter;
-			out += hex ? std::format("{0:x}", a[i]) : std::to_string(a[i]);
+			out += hex ? std::format("{0:02x}", a[i]) : std::to_string(a[i]);
 		}
 		return out;
 	}
