@@ -1,31 +1,38 @@
+#include <cassert>
 #include <cstring>
 
+#include "net.h"
 #include "shm.h"
 
 
 shm_message_queue::message * wrap_message(const size_t from_len, const uint8_t *const from,
                                           const size_t to_len,   const uint8_t *const to,
                                           const size_t pl_len,   const uint8_t *const pl,
-					  const bool   is_reply)
+					  const std::optional<uint64_t> reply_to)
 {
 	size_t   total_pl_length = 2 + from_len + 2 + to_len + 4 + pl_len;
-	size_t   total_length    = sizeof(shm_message_queue::message) + total_pl_length;
-	shm_message_queue::message *msg = reinterpret_cast<shm_message_queue::message *>(calloc(1, total_length));
+	shm_message_queue::message *msg = allocate_shm_message(total_pl_length);
 	uint8_t *payload         = reinterpret_cast<uint8_t *>(msg->data);
 	size_t   offset          = 0;
 
 	msg->size = total_pl_length;
-	msg->type = is_reply ? shm_message_queue::msg_reply : shm_message_queue::msg_new;
-
-	payload[offset++] = to_len >> 8;
-	payload[offset++] = to_len;
-	memcpy(&payload[offset], to, to_len);
-	offset += to_len;
+	if (reply_to.has_value()) {
+		msg->msg_nr = reply_to.value();
+		msg->type   = shm_message_queue::msg_reply;
+	}
+	else {
+		msg->type   = shm_message_queue::msg_new;
+	}
 
 	payload[offset++] = from_len >> 8;
 	payload[offset++] = from_len;
 	memcpy(&payload[offset], from, from_len);
 	offset += from_len;
+
+	payload[offset++] = to_len >> 8;
+	payload[offset++] = to_len;
+	memcpy(&payload[offset], to, to_len);
+	offset += to_len;
 
 	payload[offset++] = pl_len >> 24;
 	payload[offset++] = pl_len >> 16;
@@ -33,6 +40,8 @@ shm_message_queue::message * wrap_message(const size_t from_len, const uint8_t *
 	payload[offset++] = pl_len;
 	memcpy(&payload[offset], pl, pl_len);
 	offset += pl_len;
+
+	assert(offset == total_pl_length);
 
 	return msg;
 }
@@ -47,31 +56,29 @@ bool unwrap_message(const shm_message_queue::message *const m,
 
 	if (offset + 2 >= m->size)
 		return false;
-	*from_len  =  payload[offset++] << 8;
-	*from_len +=  payload[offset++];
+	*from_len = get_uint16(&payload[offset]);
+	offset += 2;
 	if (offset + *from_len >= m->size)
 		return false;
-	*from      = &payload[offset];
+	*from = &payload[offset];
 	offset += *from_len;
 
 	if (offset + 2 >= m->size)
 		return false;
-	*to_len  =  payload[offset++] << 8;
-	*to_len +=  payload[offset++];
+	*to_len = get_uint16(&payload[offset]);
+	offset += 2;
 	if (offset + *to_len >= m->size)
 		return false;
-	*to      = &payload[offset];
+	*to = &payload[offset];
 	offset += *to_len;
 
 	if (offset + 4 >= m->size)
 		return false;
-	*pl_len  =  payload[offset++] << 24;
-	*pl_len  =  payload[offset++] << 16;
-	*pl_len  =  payload[offset++] <<  8;
-	*pl_len +=  payload[offset++];
+	*pl_len = get_uint32(&payload[offset]);
+	offset += 4;
 	if (offset + *pl_len > m->size)  // not a typo
 		return false;
-	*pl      = &payload[offset];
+	*pl = &payload[offset];
 
 	return true;
 }
