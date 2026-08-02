@@ -50,10 +50,10 @@ int open_tap(const std::string & device_name, const int mtu_size)
 		return -1;
 	}
 
-	ifreq ifr_tap1 { };
-	ifr_tap1.ifr_flags = IFF_TAP | IFF_NO_PI | IFF_UP;
-	set_ifr_name(&ifr_tap1, device_name);
-	if (ioctl(fd, TUNSETIFF, &ifr_tap1) == -1) {
+	ifreq ifr_tap { };
+	ifr_tap.ifr_flags = IFF_TAP | IFF_NO_PI | IFF_UP;
+	set_ifr_name(&ifr_tap, device_name);
+	if (ioctl(fd, TUNSETIFF, &ifr_tap) == -1) {
 		DOLOG(logger::ll_error, "ioctl TUNSETIFF(%s) failed: %s", device_name.c_str(), strerror(errno));
 		return -1;
 	}
@@ -75,11 +75,11 @@ bool set_mtu_size(const std::string & device_name, const int mtu_size)
 		return false;
 	}
 
-	ifreq ifr_tap2 { };
-	set_ifr_name(&ifr_tap2, device_name);
-	ifr_tap2.ifr_addr.sa_family = AF_INET;
-	ifr_tap2.ifr_mtu            = mtu_size;
-	if (ioctl(fd_sock, SIOCSIFMTU, &ifr_tap2) == -1) {
+	ifreq ifr_tap { };
+	set_ifr_name(&ifr_tap, device_name);
+	ifr_tap.ifr_addr.sa_family = AF_INET;
+	ifr_tap.ifr_mtu            = mtu_size;
+	if (ioctl(fd_sock, SIOCSIFMTU, &ifr_tap) == -1) {
 		DOLOG(logger::ll_error, "ioctl SIOCSIFMTU(%d): %s", mtu_size, strerror(errno));
 		return false;
 	}
@@ -97,15 +97,15 @@ bool get_local_mac(const std::string & device_name, uint8_t mac_addr[6])
 		return false;
 	}
 
-	ifreq ifr_tap2 { };
-	set_ifr_name(&ifr_tap2, device_name);
-	ifr_tap2.ifr_addr.sa_family = AF_INET;
-	if (ioctl(fd_sock, SIOCGIFHWADDR, &ifr_tap2) == -1) {
+	ifreq ifr_tap { };
+	set_ifr_name(&ifr_tap, device_name);
+	ifr_tap.ifr_addr.sa_family = AF_INET;
+	if (ioctl(fd_sock, SIOCGIFHWADDR, &ifr_tap) == -1) {
 		DOLOG(logger::ll_error, "ioctl SIOCGIFHWADDR: %s", strerror(errno));
                 return false;
         }
 
-	memcpy(mac_addr, ifr_tap2.ifr_hwaddr.sa_data, 6);
+	memcpy(mac_addr, ifr_tap.ifr_hwaddr.sa_data, 6);
 	close(fd_sock);
 
 	return true;
