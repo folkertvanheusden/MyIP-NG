@@ -180,6 +180,26 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 
 bool shm_message_queue::send_message(const std::string & remote_identifier, message *const m, const bool blocking)
 {
+	int put_segment = shm_open(remote_identifier.c_str(), O_RDWR, 0600);
+	if (put_segment == -1) {
+		DOLOG(logger::ll_info, "shm_open(%s) failed: %s (remote not up yet?)", remote_identifier.c_str(), strerror(errno));
+		return false;
+	}
+
+	struct stat segment_stat { };
+	if (fstat(put_segment, &segment_stat) == -1) {
+		DOLOG(logger::ll_error, "fstat on shm failed: %s", strerror(errno));
+		close(put_segment);
+		return false;
+	}
+
+	auto *put_shm = reinterpret_cast<shared_memory *>(mmap(nullptr, segment_stat.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, put_segment, 0));
+	if (get_shm == MAP_FAILED) {
+		DOLOG(logger::ll_error, "mmap failed: %s", strerror(errno));
+		close(put_segment);
+		return false;
+	}
+
 	uint32_t length            = m->size;
 	size_t   total_msg_length  = sizeof(message) + length;
 	bool     ok                = false;
@@ -187,27 +207,29 @@ bool shm_message_queue::send_message(const std::string & remote_identifier, mess
 
 	assert(length > 0);
 
-	m->msg_nr = ++get_shm->most_recent_msg_nr;
-	memset(m->sender, 0x00, sizeof(m->sender));
-	memcpy(m->sender, local_identifier.c_str(), local_identifier.size());
-
-	if (int err = pthread_mutex_lock(&get_shm->mutex); err != 0) {
+	if (int err = pthread_mutex_lock(&put_shm->mutex); err != 0) {
 		if (err == EOWNERDEAD) {
 			DOLOG(logger::ll_error, "pthread_mutex_lock returned EOWNERDEAD, \"repairing\" mutex...");
-			pthread_mutex_consistent(&get_shm->mutex);
+			pthread_mutex_consistent(&put_shm->mutex);
 		}
 		else {
 			DOLOG(logger::ll_error, "pthread_mutex_lock failed: %s", strerror(err));
+			close(put_segment);
+			munmap(put_shm, segment_stat.st_size);
 			return false;
 		}
 	}
 
-	for(;;) {
-		if (get_shm->total_size >= get_shm->filled + padded_msg_length) {
-			memcpy(&get_shm->data[get_shm->filled], m, total_msg_length);
-			get_shm->filled += padded_msg_length;
+	m->msg_nr = ++put_shm->most_recent_msg_nr;
+	memset(m->sender, 0x00, sizeof(m->sender));
+	memcpy(m->sender, local_identifier.c_str(), local_identifier.size());
 
-			if (int err = pthread_cond_broadcast(&get_shm->condition_put); err != 0)
+	for(;;) {
+		if (put_shm->total_size >= put_shm->filled + padded_msg_length) {
+			memcpy(&put_shm->data[put_shm->filled], m, total_msg_length);
+			put_shm->filled += padded_msg_length;
+
+			if (int err = pthread_cond_broadcast(&put_shm->condition_put); err != 0)
 				DOLOG(logger::ll_error, "pthread_cond_signal failed: %s", strerror(err));
 			else
 				ok = true;
@@ -219,17 +241,22 @@ bool shm_message_queue::send_message(const std::string & remote_identifier, mess
 				break;
 			}
 
-			if (int err = pthread_cond_wait(&get_shm->condition_get, &get_shm->mutex); err != 0) {
+			if (int err = pthread_cond_wait(&put_shm->condition_get, &put_shm->mutex); err != 0) {
 				DOLOG(logger::ll_error, "pthread_cond_wait failed: %s", strerror(err));
 				break;
 			}
 		}
 	}
 
-	if (int err = pthread_mutex_unlock(&get_shm->mutex); err != 0) {
+	if (int err = pthread_mutex_unlock(&put_shm->mutex); err != 0) {
 		DOLOG(logger::ll_error, "pthread_mutex_unlock failed: %s", strerror(err));
+		close(put_segment);
+		munmap(put_shm, segment_stat.st_size);
 		return false;
 	}
+
+	close(put_segment);
+	munmap(put_shm, segment_stat.st_size);
 
 	return ok;
 }
