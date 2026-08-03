@@ -175,12 +175,12 @@ void run_cfg(addr_mac & mappings_in,                  std::mutex & mac_lock,
 			std::unique_lock<std::mutex> lck(mac_lock);
 			mappings_in = new_mac;
 		}
-		else if (parts[1] == "addip4") {
+		else if (parts[0] == "addip4") {
 			addr new_ip4(parts[1], ".", false);
 			std::unique_lock<std::mutex> lck(ip4_lock);
 			mappings_out.insert(new_ip4);
 		}
-		else if (parts[1] == "delip4") {
+		else if (parts[0] == "delip4") {
 			addr del_ip4(parts[1], ".", false);
 			std::unique_lock<std::mutex> lck(ip4_lock);
 			mappings_out.erase(del_ip4);
@@ -259,7 +259,6 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Cannot initialize shared memory segment for configuration channel\n");
 		return 1;
 	}
-ip4_list.insert(addr("192.168.1.2", ".", false));
 
 	run(&shm, mac, m_in_lock, ip4_list, m_out_lock, &shm_cfg);
 
