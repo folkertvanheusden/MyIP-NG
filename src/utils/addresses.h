@@ -53,11 +53,6 @@ struct addr {
 		return *this;
 	}
 
-	bool operator()(const addr & lhs, const addr & rhs) const {
-		assert(lhs.a_len == rhs.a_len);
-		return memcmp(lhs.a, rhs.a, a_len);
-	}
-
 	std::string to_str(const char splitter, const bool hex) const {
 		std::string out;
 		for(size_t i=0; i<a_len; i++) {
@@ -74,6 +69,8 @@ struct addr {
 		memcpy(p, a, a_len);
 	}
 };
+
+auto set_cmp = [](const addr & a, const addr & b) { return memcmp(a.a, b.a, a.a_len) < 0; };
 
 typedef addr addr_ip4;
 typedef addr addr_mac;

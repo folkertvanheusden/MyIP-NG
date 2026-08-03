@@ -24,8 +24,8 @@ void sig_handler(int sig)
 }
 
 void run_in(shm_message_queue *const shm,
-	    const addr_mac & mappings_in,                  std::mutex & mac_lock,
-            const std::set<addr_ip4, addr> & mappings_out, std::mutex & ip4_lock)
+	    const addr_mac & mappings_in,                               std::mutex & mac_lock,
+            const std::set<addr_ip4, decltype(set_cmp)> & mappings_out, std::mutex & ip4_lock)
 {
 	while(!stop_flag) {
 		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
@@ -102,13 +102,13 @@ void run_in(shm_message_queue *const shm,
 				{
 					std::unique_lock<std::mutex> lck(ip4_lock);
 					auto it = mappings_out.find(TPA);
-					if (it != mappings_out.end())
+					if (it != mappings_out.end()) {
 						known = true;
+						printf("%s\n", it->to_str('.', false).c_str());
+					}
 				}
 
 				if (known) {
-					DOLOG(logger::ll_debug, "arp sending reply with MAC address %s", mappings_in.to_str(':', true).c_str());
-
 					uint8_t payload_out[28];
 					memcpy(payload_out, pl, 28);
 					SHA.get(&payload_out[18]);  // set THA to SHA
@@ -120,9 +120,9 @@ void run_in(shm_message_queue *const shm,
 						std::unique_lock<std::mutex> lck(mac_lock);
 						mappings_in.get(&payload_out[8]);
 					}
-					// swap IP4 addresses
-					for(int i=0; i<4; i++)
-						std::swap(payload_out[i + 14], payload_out[i + 24]);
+					SPA.get(&payload_out[24]);  // who will receive
+					TPA.get(&payload_out[14]);  // who will sent
+					assert(SPA != TPA);
 
 					// push to Ethernet
 					uint8_t from[6] { };
@@ -130,6 +130,10 @@ void run_in(shm_message_queue *const shm,
 					uint8_t to  [6] { };
 					SHA.get(to);
 					auto temp_msg_nr = m->msg_nr;
+
+					DOLOG(logger::ll_debug, "Sending reply with MAC address %s",
+							mappings_in.to_str(':', true).c_str());
+
 					shm_message_queue::message *m_out = wrap_message(sizeof from, from,
 							sizeof to, to,
 							sizeof(payload_out), payload_out,
@@ -153,8 +157,8 @@ void run_in(shm_message_queue *const shm,
 	}
 }
 
-void run_cfg(addr_mac & mappings_in,                  std::mutex & mac_lock,
-	     std::set<addr_ip4, addr> & mappings_out, std::mutex & ip4_lock,
+void run_cfg(addr_mac & mappings_in,                               std::mutex & mac_lock,
+	     std::set<addr_ip4, decltype(set_cmp)> & mappings_out, std::mutex & ip4_lock,
 	     shm_message_queue *const shm_cfg)
 {
 	while(!stop_flag) {
@@ -191,8 +195,8 @@ void run_cfg(addr_mac & mappings_in,                  std::mutex & mac_lock,
 }
 
 void run(shm_message_queue *const shm,
-         addr_mac & mac,                      std::mutex & mac_lock,
-         std::set<addr_ip4, addr> & ip4_list, std::mutex & ip4_lock,
+         addr_mac & mac,                                   std::mutex & mac_lock,
+         std::set<addr_ip4, decltype(set_cmp)> & ip4_list, std::mutex & ip4_lock,
 	 shm_message_queue *const shm_cfg)
 {
 	std::thread cfg([&] { run_cfg(mac, mac_lock, ip4_list, ip4_lock, shm_cfg); });
@@ -243,7 +247,7 @@ int main(int argc, char *argv[])
 	std::mutex m_in_lock;
 	addr_mac   mac;
 	std::mutex m_out_lock;
-	std::set<addr_ip4, addr> ip4_list;
+	std::set<addr_ip4, decltype(set_cmp)> ip4_list;
 	iniparser_freedict(d);
 
 	signal(SIGINT, sig_handler);
