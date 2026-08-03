@@ -102,10 +102,8 @@ void run_in(shm_message_queue *const shm,
 				{
 					std::unique_lock<std::mutex> lck(ip4_lock);
 					auto it = mappings_out.find(TPA);
-					if (it != mappings_out.end()) {
+					if (it != mappings_out.end())
 						known = true;
-						printf("%s\n", it->to_str('.', false).c_str());
-					}
 				}
 
 				if (known) {
