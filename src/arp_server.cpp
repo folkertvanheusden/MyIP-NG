@@ -172,6 +172,8 @@ void run_cfg(addr_mac & mappings_in,                               std::mutex & 
 			continue;
 		}
 
+		DOLOG(logger::ll_debug, "Received cfg item: \"%s\"", kv.c_str());
+
 		if (parts[0] == "setmac") {
 			addr new_mac(parts[1], ":", true);
 			std::unique_lock<std::mutex> lck(mac_lock);
