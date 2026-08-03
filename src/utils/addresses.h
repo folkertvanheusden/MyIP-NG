@@ -72,6 +72,14 @@ struct addr {
 		assert(a_len);
 		memcpy(p, a, a_len);
 	}
+
+	const uint8_t *get() const {
+		return a;
+	}
+
+	size_t length() const {
+		return a_len;
+	}
 };
 
 auto set_cmp = [](const addr & a, const addr & b) { return memcmp(a.a, b.a, a.a_len) < 0; };
