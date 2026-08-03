@@ -50,6 +50,10 @@ struct addr {
 		return memcmp(a, input.a, a_len) != 0;
 	}
 
+	bool operator==(const addr & input) {
+		return memcmp(a, input.a, a_len) == 0;
+	}
+
 	addr & operator=(const addr & input) {
 		a = new uint8_t[input.a_len];
 		memcpy(a, input.a, input.a_len);
