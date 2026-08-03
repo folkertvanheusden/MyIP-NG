@@ -41,13 +41,6 @@ void sig_handler(int sig)
 	stop_flag = true;
 }
 
-static void set_ifr_name(ifreq *const ifr, const std::string & device_name)
-{
-	size_t copy_name_n = std::min(size_t(IFNAMSIZ), device_name.size());
-	memcpy(ifr->ifr_name, device_name.c_str(), copy_name_n);
-	ifr->ifr_name[copy_name_n] = 0x00;
-}
-
 std::optional<prom_handle> open_promiscuous_dev(const std::string & device_name)
 {
 	prom_handle ph { };
@@ -338,6 +331,11 @@ int main(int argc, char *argv[])
 		msg_queue_size = 16384;
 		fprintf(stderr, "Using default msg queue size of %d bytes\n", msg_queue_size);
 	}
+	int run_as = iniparser_getint(d, "global:run-as", -1);
+	if (run_as == -1) {
+		fprintf(stderr, "\"run-as\" not set (in \"global\")\n");
+		return 1;
+	}
 	std::map<uint16_t, std::string> mappings_in;
 	std::map<std::string, uint16_t> mappings_out;
 	load_mappings(&mappings_in, &mappings_out, d);
@@ -345,15 +343,20 @@ int main(int argc, char *argv[])
 
 	signal(SIGINT, sig_handler);
 
-	shm_message_queue shm(name, msg_queue_size);
-	if (shm.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment\n");
-		return 1;
-	}
-
 	std::optional<prom_handle> handle = open_promiscuous_dev(device_name);
 	if (handle.has_value() == false) {
 		fprintf(stderr, "Cannot initialize network device\n");
+		return 1;
+	}
+
+	if (setuid(run_as) == -1) {
+		fprintf(stderr, "Cannot change user to %d: %s\n", run_as, strerror(errno));
+		return 1;
+	}
+
+	shm_message_queue shm(name, msg_queue_size);
+	if (shm.begin() == false) {
+		fprintf(stderr, "Cannot initialize shared memory segment\n");
 		return 1;
 	}
 

@@ -337,6 +337,11 @@ int main(int argc, char *argv[])
 		mtu_size = 1512;
 		fprintf(stderr, "Using default MTU size of %d bytes\n", mtu_size);
 	}
+        int run_as = iniparser_getint(d, "global:run-as", -1);
+        if (run_as == -1) {
+                fprintf(stderr, "\"run-as\" not set (in \"global\")\n");
+                return 1;
+        }
 	std::map<uint16_t, std::string> mappings_in;
 	std::map<std::string, uint16_t> mappings_out;
 	load_mappings(&mappings_in, &mappings_out, d);
@@ -344,16 +349,21 @@ int main(int argc, char *argv[])
 
 	signal(SIGINT, sig_handler);
 
+	int               tap_fd = open_tap(device_name, mtu_size);
+	uint8_t           mac_addr[6] { };
+	get_local_mac(device_name, mac_addr);
+	set_mtu_size (device_name, mtu_size);
+
+	if (setuid(run_as) == -1) {
+		fprintf(stderr, "Cannot change user to %d: %s\n", run_as, strerror(errno));
+		return 1;
+	}
+
 	shm_message_queue shm(name, msg_queue_size);
 	if (shm.begin() == false) {
 		fprintf(stderr, "Cannot initialize shared memory segment\n");
 		return 1;
 	}
-
-	int               tap_fd = open_tap(device_name, mtu_size);
-	uint8_t           mac_addr[6] { };
-	get_local_mac(device_name, mac_addr);
-	set_mtu_size (device_name, mtu_size);
 
 	run(&shm, tap_fd, mac_addr, mappings_in, mappings_out, announce_mac_name);
 
