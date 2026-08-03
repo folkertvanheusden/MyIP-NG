@@ -65,7 +65,7 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 
 			if (header_size > ip_size)
 				DOLOG(logger::ll_debug, "Invalid IP4 header size");
-			else if (ip_size > pl_len)
+			else if (ip_size > ssize_t(pl_len))
 				DOLOG(logger::ll_debug, "Invalid IP4 size");
 			else if (it == mappings_in.end()) {
 				DOLOG(logger::ll_debug, "Protocol %d not known", protocol);
@@ -100,7 +100,7 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 }
 
 void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & listen_addr,
-             const std::map<std::string, uint8_t> & mappings_out)
+             const std::map<std::string, uint8_t> & mappings_out, const std::string & link_name)
 {
 	while(!stop_flag) {
 		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
@@ -138,13 +138,13 @@ void announcer(shm_message_queue *const shm, const std::string & announce_ip4_ad
 void run(shm_message_queue *const shm, const std::string & announce_ip4_addr, const std::pair<addr_ip4, int> & listen_addr,
          const std::map<uint8_t, std::string> & mappings_in,
          const std::map<std::string, uint8_t> & mappings_out,
-	 const std::string & icmp_name,
-	 shm_message_queue *const shm_out)
+	 const std::string & icmp_name, const std::string & link_name)
 {
-	std::thread rx([&] { run_in (shm,     listen_addr, mappings_in,  icmp_name); });
-	std::thread tx([&] { run_out(shm_out, listen_addr, mappings_out           ); });
+	std::thread rx([&] { run_in (shm, listen_addr, mappings_in,  icmp_name); });
+	std::thread tx([&] { run_out(shm, listen_addr, mappings_out, link_name); });
         std::thread announce([shm, announce_ip4_addr, listen_addr] { announcer(shm, announce_ip4_addr, listen_addr.first); });
         announce.join();
+        tx.join();
 	rx.join();
 }
 
@@ -206,11 +206,6 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"out-name\" under \"global\" missing\n");
 		return 1;
 	}
-	std::string cfg_name = iniparser_getstring(d, "global:cfg-name",  "");
-	if (cfg_name.empty()) {
-		fprintf(stderr, "\"cfg-name\" under \"global\" missing\n");
-		return 1;
-	}
 	std::string icmp_name = iniparser_getstring(d, "specific:icmp-name",  "");
 	if (icmp_name.empty()) {
 		fprintf(stderr, "\"icmp-name\" under \"specific\" missing\n");
@@ -247,17 +242,11 @@ int main(int argc, char *argv[])
 
 	shm_message_queue shm(name, msg_queue_size);
 	if (shm.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment\n");
+		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", name.c_str());
 		return 1;
 	}
 
-	shm_message_queue shm_out(out_name, msg_queue_size);
-	if (shm.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment\n");
-		return 1;
-	}
-
-	run(&shm, announce_ip4_addr, { listen_addr, cidr }, mappings_in, mappings_out, icmp_name, &shm_out);
+	run(&shm, announce_ip4_addr, { listen_addr, cidr }, mappings_in, mappings_out, icmp_name, out_name);
 
 	return 0;
 }
