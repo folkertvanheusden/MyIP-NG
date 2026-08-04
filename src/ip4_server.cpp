@@ -77,6 +77,10 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 			else if (ip4_dst != listen_addr.first)
 				DOLOG(logger::ll_debug, "%s is not for this instance", ip4_dst.to_str('.', false).c_str());
 			else {
+				DOLOG(logger::ll_debug, "IP4 packet (IN) from %s to %s put in SHM for processing",
+					ip4_src.to_str('.', false).c_str(),
+					ip4_dst.to_str('.', false).c_str());
+
 				// TODO fragmentation
 
 				// TODO check checksum
@@ -275,6 +279,9 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 			pending_messages.insert({ from_msg_nr.value(), pm });
 			pending_messages.insert({ to_msg_nr  .value(), pm });
 			// NO free of 'm'! it is 'moved' to pending_messages!
+			DOLOG(logger::ll_debug, "IP4 packet (OUT) from %s to %s queued for processing",
+					addr(from, from_len).to_str('.', false).c_str(),
+					addr(to,   to_len  ).to_str('.', false).c_str());
 		}
 		else {
 			DOLOG(logger::ll_warning, "Could not start resolve of either from and/or to");
