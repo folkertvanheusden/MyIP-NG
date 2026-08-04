@@ -1,9 +1,9 @@
 #include <cassert>
 #include <cstdint>
 
-#include "utils/log.h"
-#include "utils/shm.h"
-#include "utils/shm_message.h"
+#include "../utils/log.h"
+#include "../utils/shm.h"
+#include "../utils/shm_message.h"
 
 
 int main(int argc, char *argv[])

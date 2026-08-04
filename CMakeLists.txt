@@ -23,11 +23,11 @@ add_library(log
 )
 
 add_executable(shm_test
-	src/shm_test.cpp
+	src/tests/shm_test.cpp
 	)
 
 add_executable(shm_test2
-	src/shm_test2.cpp
+	src/tests/shm_test2.cpp
 	src/utils/net.cpp
 	src/utils/shm_message.cpp
 	)
