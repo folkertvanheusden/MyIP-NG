@@ -117,7 +117,8 @@ std::optional<uint64_t> start_resolve_by_ip4(shm_message_queue *const shm_resolv
 // any messages from something sent to this server to be sent out via its parent?
 void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & listen_addr,
              const std::map<std::string, uint8_t> & mappings_out, const std::string & link_name,
-	     shm_message_queue *const shm_resolver_replies, const std::string & resolver_name)
+	     shm_message_queue *const shm_resolver_replies, const std::string & resolver_name,
+	     shm_message_queue *const shm_upper_in)
 {
 	struct pending_msg {
 		uint64_t ts;  // when it was placed in the queue
@@ -232,7 +233,7 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 	});
 
 	while(!stop_flag) {
-		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
+		shm_message_queue::message *m = shm_upper_in->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
 		if (!m)
 			continue;
 
@@ -249,7 +250,9 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 		}
 
 		if (from_len != 4 || to_len != 4) {
-			DOLOG(logger::ll_warning, "Unexpected from (%zu)/to (%zu) address size(s)", from_len, to_len);
+			DOLOG(logger::ll_warning, "Unexpected from (%zu: %s)/to (%zu: %s) address size(s)",
+					from_len, dump(from, from_len).c_str(),
+					to_len,   dump(to,    to_len ).c_str());
 			free(m);
 			continue;
 		}
@@ -303,10 +306,11 @@ void run(shm_message_queue *const shm, const std::string & announce_ip4_addr, co
          const std::map<uint8_t, std::string> & mappings_in,
          const std::map<std::string, uint8_t> & mappings_out,
 	 const std::string & icmp_name, const std::string & link_name,
-	 shm_message_queue *const shm_resolver_replies, const std::string & resolver_name)
+	 shm_message_queue *const shm_resolver_replies, const std::string & resolver_name,
+	 shm_message_queue *const upper_in)
 {
 	std::thread rx([&] { run_in (shm, listen_addr, mappings_in,  icmp_name); });
-	std::thread tx([&] { run_out(shm, listen_addr, mappings_out, link_name, shm_resolver_replies, resolver_name); });
+	std::thread tx([&] { run_out(shm, listen_addr, mappings_out, link_name, shm_resolver_replies, resolver_name, upper_in); });
         std::thread announce([shm, announce_ip4_addr, listen_addr] { announcer(shm, announce_ip4_addr, listen_addr.first); });
         announce.join();
         tx.join();
@@ -361,9 +365,14 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 	}
-	std::string name = iniparser_getstring(d, "global:name",  "");
-	if (name.empty()) {
-		fprintf(stderr, "\"name\" under \"global\" missing\n");
+	std::string lower_in_name = iniparser_getstring(d, "global:lower-in-name",  "");
+	if (lower_in_name.empty()) {
+		fprintf(stderr, "\"lower-in-name\" under \"global\" missing\n");
+		return 1;
+	}
+	std::string upper_in_name = iniparser_getstring(d, "global:upper-in-name",  "");
+	if (upper_in_name.empty()) {
+		fprintf(stderr, "\"upper-in-name\" under \"global\" missing\n");
 		return 1;
 	}
 	std::string out_name = iniparser_getstring(d, "global:out-name",  "");
@@ -415,9 +424,9 @@ int main(int argc, char *argv[])
 
 	signal(SIGINT, sig_handler);
 
-	shm_message_queue shm(name, msg_queue_size);
+	shm_message_queue shm(lower_in_name, msg_queue_size);
 	if (shm.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", name.c_str());
+		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", lower_in_name.c_str());
 		return 1;
 	}
 
@@ -427,7 +436,14 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	run(&shm, announce_ip4_addr, { listen_addr, cidr }, mappings_in, mappings_out, icmp_name, out_name, &shm_resolver_replies, resolver_name);
+	shm_message_queue shm_upper_in(upper_in_name, msg_queue_size);
+	if (shm_upper_in.begin() == false) {
+		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", upper_in_name.c_str());
+		return 1;
+	}
+
+	run(&shm, announce_ip4_addr, { listen_addr, cidr }, mappings_in, mappings_out,
+            icmp_name, out_name, &shm_resolver_replies, resolver_name, &shm_upper_in);
 
 	return 0;
 }
