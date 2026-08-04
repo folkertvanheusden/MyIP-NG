@@ -32,6 +32,12 @@ add_executable(shm_test2
 	src/utils/shm_message.cpp
 	)
 
+add_executable(arp_test
+	src/tests/arp_test.cpp
+	src/utils/net.cpp
+	src/utils/shm_message.cpp
+	)
+
 add_executable(tap_server
 	src/utils/net.cpp
 	src/utils/shm_message.cpp
@@ -59,6 +65,7 @@ add_executable(ip4_server
 	)
 
 target_link_libraries(arp_server shm log)
+target_link_libraries(arp_test shm log)
 target_link_libraries(ip4_server shm log)
 target_link_libraries(promiscuous_server shm log)
 target_link_libraries(shm_test shm log)
