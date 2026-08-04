@@ -1,6 +1,7 @@
 #include <atomic>
 #include <cassert>
 #include <cerrno>
+#include <cinttypes>
 #include <csignal>
 #include <map>
 #include <mutex>
@@ -15,6 +16,7 @@
 #include "utils/shm.h"
 #include "utils/shm_message.h"
 #include "utils/str.h"
+#include "utils/time.h"
 
 
 std::atomic_bool stop_flag { false };
@@ -77,21 +79,16 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 				// TODO fragmentation
 
 				// wrap IP4
-				auto wrapped_ip4 = wrap_message(
+				auto *wrapped = wrap_message(
 					  ip4_src.length(), ip4_src.get(),
 					  ip4_dst.length(), ip4_dst.get(),
-                                          ip_size - header_size, &pl[header_size]);
+                                          ip_size - header_size, &pl[header_size],
+					  { });
 
-				auto *fully_wrapped = wrap_message(
-						from_len, from,
-						to_len,   to,
-						wrapped_ip4.second, wrapped_ip4.first,
-						{ });
-				free(wrapped_ip4.first);
+				if (shm->send_message(it->second, wrapped, false) == false)
+					DOLOG(logger::ll_warning, "Cannot send to %s", it->second.c_str());
 
-				shm->send_message(it->second, fully_wrapped, false);
-
-				free(fully_wrapped);
+				free(wrapped);
 			}
 		}
 
@@ -99,16 +96,143 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 	}
 }
 
-void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & listen_addr,
-             const std::map<std::string, uint8_t> & mappings_out, const std::string & link_name)
+std::optional<uint64_t> start_resolve_by_ip4(shm_message_queue *const shm_resolver_replies, const std::string & resolver_name, const addr_ip4 & a)
 {
+	const std::string msg = std::format("search-mac={0}", a.to_str(':', true));
+
+	shm_message_queue::message *res_req_msg = allocate_shm_message(msg.size());
+	res_req_msg->type = shm_message_queue::msg_new;
+	res_req_msg->size = msg.size();
+	memcpy(res_req_msg->data, msg.c_str(), msg.size());
+	if (shm_resolver_replies->send_message(resolver_name, res_req_msg, false)) {
+		uint64_t msg_nr = res_req_msg->msg_nr;
+		free(res_req_msg);
+		return msg_nr;
+	}
+
+	free(res_req_msg);
+	return { };
+}
+
+// any messages from something sent to this server to be sent out via its parent?
+void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & listen_addr,
+             const std::map<std::string, uint8_t> & mappings_out, const std::string & link_name,
+	     shm_message_queue *const shm_resolver_replies, const std::string & resolver_name)
+{
+	struct pending_msg {
+		uint64_t ts;  // when it was placed in the queue
+		shm_message_queue::message *queued_msg;
+		uint64_t                from_nr;
+		std::optional<addr_mac> from;
+		uint64_t                to_nr;
+		std::optional<addr_mac> to;
+	};
+
+	std::map<uint64_t, pending_msg *> pending_messages;
+	std::mutex pending_messages_lock;
+
+	// TODO cleaner thread
+
+	std::thread th_sender([&] {
+		while(!stop_flag) {
+			shm_message_queue::message *resolve_result = shm_resolver_replies->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_reply, { });
+			if (!resolve_result)
+				continue;
+
+			// find record for this parameter
+			auto it = pending_messages.find(resolve_result->msg_nr);
+			if (it == pending_messages.end()) {
+				DOLOG(logger::ll_error, "Request-record for message from \"%s\" cannot be found", resolve_result->sender);
+				free(resolve_result);
+				continue;
+			}
+
+			// fill in missing part
+			std::string resolve_result_str(reinterpret_cast<const char *>(resolve_result->data), resolve_result->size);
+			auto is = resolve_result_str.find("=mac:");
+			// should verify IP4 address
+			if (is == std::string::npos) {
+				DOLOG(logger::ll_error, "Request-record contains invalid answer: \"%s\"", resolve_result_str.c_str());
+				free(resolve_result);
+				continue;
+			}
+			addr_mac resolve_result_addr(resolve_result_str.substr(is + 5), ":", true);
+
+			auto *pending_msg_meta = it->second;
+			if (pending_msg_meta->from_nr == it->first)
+				pending_msg_meta->from = resolve_result_addr;
+			else if (pending_msg_meta->to_nr == it->first)
+				pending_msg_meta->to   = resolve_result_addr;
+			else {
+				DOLOG(logger::ll_error, "Unexpected message number %" PRIu64 ", expected either %" PRIu64 " or %" PRIu64, it->first, pending_msg_meta->from_nr, pending_msg_meta->to_nr);
+				pending_messages.erase(it);
+				free(resolve_result);
+				continue;
+			}
+
+			// if either one has not been filled in, continue
+			if (pending_msg_meta->from.has_value() == false ||
+			    pending_msg_meta->to  .has_value() == false) {
+				pending_messages.erase(it);  // erase one of the pending msg meta-records
+				free(resolve_result);
+				continue;
+			}
+
+			// encapsulate, send to link_name
+			auto protocol_it = mappings_out.find(pending_msg_meta->queued_msg->sender);
+			if (protocol_it == mappings_out.end())
+				DOLOG(logger::ll_error, "Message from \"%s\" cannot be mapped", pending_msg_meta->queued_msg->sender);
+			else {
+				int protocol = protocol_it->second;
+
+				// TODO
+				// make further
+				// SEND via shm[link_name] 
+			}
+
+			free(pending_msg_meta->queued_msg);
+			delete pending_msg_meta;
+			pending_messages.erase(it);  // should be the last pending msg meta-record
+			free(resolve_result);
+		}
+	});
+
 	while(!stop_flag) {
 		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
 		if (!m)
 			continue;
 
-		// TODO
+		size_t         from_len = 0;
+		size_t         to_len   = 0;
+		size_t         pl_len   = 0;
+		const uint8_t *from     = nullptr;
+		const uint8_t *to       = nullptr;
+		const uint8_t *pl       = nullptr;
+		if (unwrap_message(m, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
+			DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
+			free(m);
+			continue;
+		}
+
+		auto from_msg_nr = start_resolve_by_ip4(shm_resolver_replies, resolver_name, addr_mac(from, 6));
+		auto to_msg_nr   = start_resolve_by_ip4(shm_resolver_replies, resolver_name, addr_mac(to,   6));
+
+		if (from_msg_nr.has_value() && to_msg_nr.has_value())
+		{
+			auto         now = get_us();
+			pending_msg *pm  = new pending_msg { now, m, from_msg_nr.value(), { }, to_msg_nr.value(), { } };
+			std::unique_lock<std::mutex> lck(pending_messages_lock);
+			pending_messages.insert({ from_msg_nr.value(), pm });
+			pending_messages.insert({ to_msg_nr  .value(), pm });
+			// NO free of 'm'! it is 'moved' to pending_messages!
+		}
+		else {
+			DOLOG(logger::ll_warning, "Could not start resolve of either from and/or to");
+			free(m);
+		}
 	}
+
+	th_sender.join();
 }
 
 void announcer(shm_message_queue *const shm, const std::string & announce_ip4_addr, const addr_ip4 & addr)
@@ -138,10 +262,11 @@ void announcer(shm_message_queue *const shm, const std::string & announce_ip4_ad
 void run(shm_message_queue *const shm, const std::string & announce_ip4_addr, const std::pair<addr_ip4, int> & listen_addr,
          const std::map<uint8_t, std::string> & mappings_in,
          const std::map<std::string, uint8_t> & mappings_out,
-	 const std::string & icmp_name, const std::string & link_name)
+	 const std::string & icmp_name, const std::string & link_name,
+	 shm_message_queue *const shm_resolver_replies, const std::string & resolver_name)
 {
 	std::thread rx([&] { run_in (shm, listen_addr, mappings_in,  icmp_name); });
-	std::thread tx([&] { run_out(shm, listen_addr, mappings_out, link_name); });
+	std::thread tx([&] { run_out(shm, listen_addr, mappings_out, link_name, shm_resolver_replies, resolver_name); });
         std::thread announce([shm, announce_ip4_addr, listen_addr] { announcer(shm, announce_ip4_addr, listen_addr.first); });
         announce.join();
         tx.join();
@@ -211,6 +336,16 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"icmp-name\" under \"specific\" missing\n");
 		return 1;
 	}
+	std::string resolver_name = iniparser_getstring(d, "specific:resolver-name",  "");
+	if (resolver_name.empty()) {
+		fprintf(stderr, "\"resolver-name\" under \"specific\" missing\n");
+		return 1;
+	}
+	std::string resolver_replies = iniparser_getstring(d, "specific:resolver-replies",  "");
+	if (resolver_replies.empty()) {
+		fprintf(stderr, "\"resolver-replies\" under \"specific\" missing\n");
+		return 1;
+	}
 	int msg_queue_size = iniparser_getint(d, "specific:msg-queue-size", 0);
 	if (msg_queue_size == 0) {
 		msg_queue_size = 16384;
@@ -246,7 +381,13 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	run(&shm, announce_ip4_addr, { listen_addr, cidr }, mappings_in, mappings_out, icmp_name, out_name);
+	shm_message_queue shm_resolver_replies(resolver_replies, msg_queue_size);
+	if (shm_resolver_replies.begin() == false) {
+		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", resolver_replies.c_str());
+		return 1;
+	}
+
+	run(&shm, announce_ip4_addr, { listen_addr, cidr }, mappings_in, mappings_out, icmp_name, out_name, &shm_resolver_replies, resolver_name);
 
 	return 0;
 }
