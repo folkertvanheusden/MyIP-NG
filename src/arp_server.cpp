@@ -46,7 +46,8 @@ void push_resolver_reply(shm_message_queue *const shm_resolver, const std::strin
 void run_resolver(shm_message_queue *const shm_resolver, std::vector<request> *const requests, std::mutex & requests_lock,
 		  const std::set<addr_ip4, decltype(set_cmp)> & ip4_list, std::mutex & ip4_lock,
 		  const addr_mac & mac,                                   std::mutex & mac_lock,
-		  const std::string & out_name)
+		  const std::string & out_name,
+		  shm_message_queue *const shm_out)
 {
 	while(!stop_flag) {
 		shm_message_queue::message *m = shm_resolver->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
@@ -72,8 +73,7 @@ void run_resolver(shm_message_queue *const shm_resolver, std::vector<request> *c
 
 		if (parts[0] == "search-mac") {  // search MAC by IP4
 			r.ip4 = addr_ip4(parts[1], ".", false);
-			SPA   = r.ip4.value();
-			TPA   = SPA;
+			TPA   = r.ip4.value();
 
 			// if me, return right away
 			{
@@ -85,6 +85,11 @@ void run_resolver(shm_message_queue *const shm_resolver, std::vector<request> *c
 					free(m);
 					continue;
 				}
+
+				if (ip4_list.empty() == false)
+					SPA = *ip4_list.begin();
+				else
+					DOLOG(logger::ll_info, "Cannot set TPA for ARP: not known yet");
 			}
 		}
 		else if (parts[0] == "search-ip4") {  // search IP4 by MAC
@@ -104,7 +109,9 @@ void run_resolver(shm_message_queue *const shm_resolver, std::vector<request> *c
 			requests->push_back(r);
 		}
 
-		DOLOG(logger::ll_debug, "Sending ARP request");
+		DOLOG(logger::ll_debug, "Sending ARP request, THA: %s, SHA: %s, TPA: %s, SPA: %s",
+					THA.to_str(':', true ).c_str(), SHA.to_str(':', true ).c_str(),
+					TPA.to_str('.', false).c_str(), SPA.to_str('.', false).c_str());
 
 		uint8_t request[44] { 0 };
 		request[1] = 1;  // HTYPE Ethernet
@@ -131,7 +138,7 @@ void run_resolver(shm_message_queue *const shm_resolver, std::vector<request> *c
                                         sizeof request, request,
 					{ });
 		// send request to link layer
-		shm_resolver->send_message(out_name, m_out, false);
+		shm_out->send_message(out_name, m_out, false);
 		free(m_out);
 
 		free(m);
@@ -349,7 +356,7 @@ void run(shm_message_queue *const shm,
 	 shm_message_queue *const shm_resolver,
 	 const std::string & out_name)
 {
-	std::thread res([&] { run_resolver(shm_resolver, requests, requests_lock, ip4_list, ip4_lock, mac, mac_lock, out_name); });
+	std::thread res([&] { run_resolver(shm_resolver, requests, requests_lock, ip4_list, ip4_lock, mac, mac_lock, out_name, shm); });
 	std::thread cfg([&] { run_cfg(mac, mac_lock, ip4_list, ip4_lock, shm_cfg); });
 	std::thread rx ([&] { run_in (shm, mac, mac_lock, ip4_list, ip4_lock, requests, requests_lock, shm_resolver); });
 	rx.join();
