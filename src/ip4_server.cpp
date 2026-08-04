@@ -202,7 +202,7 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 					size_t   complete_msg_size = pl_len + 20;
 					uint8_t *complete_msg      = new uint8_t[complete_msg_size]();
 					uint8_t *header            = complete_msg;
-					header[0] = 4 << 4;
+					header[0] = (4 << 4) | 5;
 					header[2] = pending_msg_meta->queued_msg->size >> 8;
 					header[3] = pending_msg_meta->queued_msg->size;
 					header[8] = 63;  // TTL
