@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cerrno>
 #include <csignal>
+#include <map>
 #include <mutex>
 #include <set>
 #include <thread>
@@ -47,7 +48,8 @@ void run_resolver(shm_message_queue *const shm_resolver, std::vector<request> *c
 		  const std::set<addr_ip4, decltype(set_cmp)> & ip4_list, std::mutex & ip4_lock,
 		  const addr_mac & mac,                                   std::mutex & mac_lock,
 		  const std::string & out_name,
-		  shm_message_queue *const shm_out)
+		  shm_message_queue *const shm_out,
+		  std::map<addr_ip4, addr_mac, decltype(set_cmp)> *arp_cache, std::mutex & arp_cache_lock)
 {
 	while(!stop_flag) {
 		shm_message_queue::message *m = shm_resolver->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
@@ -90,6 +92,20 @@ void run_resolver(shm_message_queue *const shm_resolver, std::vector<request> *c
 					SPA = *ip4_list.begin();
 				else
 					DOLOG(logger::ll_info, "Cannot set TPA for ARP: not known yet");
+			}
+
+			// in cache?
+			{
+				std::unique_lock<std::mutex> lck(arp_cache_lock);
+				auto it = arp_cache->find(r.ip4.value());
+				if (it != arp_cache->end()) {
+					lck.unlock();
+					auto reply = "ip4:" + r.ip4.value().to_str('.', false) + "=mac:" + it->second.to_str(':', true);
+					DOLOG(logger::ll_debug, "ARP cache hit: \"%s\"", reply.c_str());
+					push_resolver_reply(shm_resolver, m->sender, reply, m->msg_nr);
+					free(m);
+					continue;
+				}
 			}
 		}
 		else if (parts[0] == "search-ip4") {  // search IP4 by MAC
@@ -175,7 +191,8 @@ void run_in(shm_message_queue *const shm,
 	    const addr_mac & mappings_in,                               std::mutex & mac_lock,
             const std::set<addr_ip4, decltype(set_cmp)> & mappings_out, std::mutex & ip4_lock,
 	    std::vector<request> *const requests,                       std::mutex & requests_lock,
-	    shm_message_queue *const shm_resolver)
+	    shm_message_queue *const shm_resolver,
+	    std::map<addr_ip4, addr_mac, decltype(set_cmp)> *arp_cache, std::mutex & arp_cache_lock)
 {
 	while(!stop_flag) {
 		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
@@ -298,6 +315,11 @@ void run_in(shm_message_queue *const shm,
 				addr_mac SHA(pl +  8, 6);
 				addr_ip4 SPA(pl + 14, 4);
 
+				{
+					std::unique_lock<std::mutex> lck(arp_cache_lock);
+					arp_cache->insert({ SPA, SHA });
+				}
+
 				register_resolve_reply(shm_resolver, requests, requests_lock, SHA, SPA);
 			}
 			else {
@@ -354,11 +376,12 @@ void run(shm_message_queue *const shm,
 	 shm_message_queue *const shm_cfg,
 	 std::vector<request> *const requests, std::mutex & requests_lock,
 	 shm_message_queue *const shm_resolver,
-	 const std::string & out_name)
+	 const std::string & out_name,
+	 std::map<addr_ip4, addr_mac, decltype(set_cmp)> *arp_cache, std::mutex & arp_cache_lock)
 {
-	std::thread res([&] { run_resolver(shm_resolver, requests, requests_lock, ip4_list, ip4_lock, mac, mac_lock, out_name, shm); });
+	std::thread res([&] { run_resolver(shm_resolver, requests, requests_lock, ip4_list, ip4_lock, mac, mac_lock, out_name, shm, arp_cache, arp_cache_lock); });
 	std::thread cfg([&] { run_cfg(mac, mac_lock, ip4_list, ip4_lock, shm_cfg); });
-	std::thread rx ([&] { run_in (shm, mac, mac_lock, ip4_list, ip4_lock, requests, requests_lock, shm_resolver); });
+	std::thread rx ([&] { run_in (shm, mac, mac_lock, ip4_list, ip4_lock, requests, requests_lock, shm_resolver, arp_cache, arp_cache_lock); });
 	rx.join();
 	cfg.join();
 	res.join();
@@ -442,7 +465,10 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	run(&shm, mac, m_in_lock, ip4_list, m_out_lock, &shm_cfg, &requests, requests_lock, &shm_resolver, out_name);
+	std::map<addr_ip4, addr_mac, decltype(set_cmp)> cache;
+	std::mutex cache_lock;
+
+	run(&shm, mac, m_in_lock, ip4_list, m_out_lock, &shm_cfg, &requests, requests_lock, &shm_resolver, out_name, &cache, cache_lock);
 
 	return 0;
 }
