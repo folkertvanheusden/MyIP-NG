@@ -66,8 +66,17 @@ add_executable(ip4_server
 	src/utils/time.cpp
 	)
 
+add_executable(icmp_server
+	src/icmp_server.cpp
+	src/utils/checksum.cpp
+	src/utils/net.cpp
+	src/utils/shm_message.cpp
+	src/utils/str.cpp
+	)
+
 target_link_libraries(arp_server shm log)
 target_link_libraries(arp_test shm log)
+target_link_libraries(icmp_server shm log)
 target_link_libraries(ip4_server shm log)
 target_link_libraries(promiscuous_server shm log)
 target_link_libraries(shm_test shm log)
@@ -85,6 +94,9 @@ pkg_check_modules(INI REQUIRED iniparser)
 target_link_libraries(arp_server ${INI_LIBRARIES})
 target_include_directories(arp_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(arp_server PUBLIC ${INI_CFLAGS_OTHER})
+target_link_libraries(icmp_server ${INI_LIBRARIES})
+target_include_directories(icmp_server PUBLIC ${INI_INCLUDE_DIRS})
+target_compile_options(icmp_server PUBLIC ${INI_CFLAGS_OTHER})
 target_link_libraries(ip4_server ${INI_LIBRARIES})
 target_include_directories(ip4_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(ip4_server PUBLIC ${INI_CFLAGS_OTHER})
