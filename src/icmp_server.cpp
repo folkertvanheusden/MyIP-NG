@@ -13,6 +13,7 @@
 #include "utils/shm.h"
 #include "utils/shm_message.h"
 #include "utils/str.h"
+#include "utils/time.h"
 
 
 std::atomic_bool stop_flag { false };
@@ -60,7 +61,21 @@ void run_in(shm_message_queue *const shm, const std::string & out_name)
 
 		if (type == 8 && code == 0) {  // echo request
 			addr_ip4 from_ip4(from, from_len);
-			DOLOG(logger::ll_debug, "ECHO request from %s", from_ip4.to_str('.', false).c_str());
+
+			std::string age_str;
+			if (pl_len >= 24) {  // may include timestamp
+				timeval tv { };
+				memcpy(&tv, &pl[8], sizeof tv);
+
+				uint64_t now_local = get_us();
+
+				if (labs(tv.tv_sec - now_local / 1'000'000) < 3) {
+					uint64_t age = now_local - (tv.tv_sec * 1'000'000 + tv.tv_usec);
+					age_str += " (sent " + std::to_string(age) + "µs ago)";
+				}
+			}
+
+			DOLOG(logger::ll_debug, "ECHO request from %s%s", from_ip4.to_str('.', false).c_str(), age_str.c_str());
 
 			size_t   reply_len = pl_len;
 			uint8_t *reply     = new uint8_t[reply_len];

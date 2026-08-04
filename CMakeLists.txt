@@ -72,6 +72,7 @@ add_executable(icmp_server
 	src/utils/net.cpp
 	src/utils/shm_message.cpp
 	src/utils/str.cpp
+	src/utils/time.cpp
 	)
 
 target_link_libraries(arp_server shm log)
