@@ -98,7 +98,7 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 
 std::optional<uint64_t> start_resolve_by_ip4(shm_message_queue *const shm_resolver_replies, const std::string & resolver_name, const addr_ip4 & a)
 {
-	const std::string msg = std::format("search-mac={0}", a.to_str(':', true));
+	const std::string msg = std::format("search-mac={0}", a.to_str('.', false));
 
 	shm_message_queue::message *res_req_msg = allocate_shm_message(msg.size());
 	res_req_msg->type = shm_message_queue::msg_new;
@@ -185,9 +185,43 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 			else {
 				int protocol = protocol_it->second;
 
-				// TODO
-				// make further
-				// SEND via shm[link_name] 
+				size_t         from_len = 0;
+				size_t         to_len   = 0;
+				size_t         pl_len   = 0;
+				const uint8_t *from     = nullptr;
+				const uint8_t *to       = nullptr;
+				const uint8_t *pl       = nullptr;
+				if (unwrap_message(pending_msg_meta->queued_msg, &from_len, &from, &to_len, &to, &pl_len, &pl) == false)
+					DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
+					// goto should be an option here
+				else {
+					size_t   complete_msg_size = pl_len + 20;
+					uint8_t *complete_msg      = new uint8_t[complete_msg_size]();
+					uint8_t *header            = complete_msg;
+					header[0] = 4 << 4;
+					header[2] = pending_msg_meta->queued_msg->size >> 8;
+					header[3] = pending_msg_meta->queued_msg->size;
+					header[8] = 63;  // TTL
+					header[9] = protocol;
+					// TODO checksum (10, 11)
+					memcpy(&header[12], from, 4);
+					memcpy(&header[16], to,   4);
+					memcpy(&complete_msg[20], pl, pl_len);
+
+					auto *wrapped = wrap_message(
+							pending_msg_meta->from.value().length(), pending_msg_meta->from.value().get(),
+							pending_msg_meta->to  .value().length(), pending_msg_meta->to  .value().get(),
+							complete_msg_size, complete_msg,
+							{ });
+
+					// SEND via shm[link_name] 
+					if (shm->send_message(link_name, wrapped, false) == false)
+						DOLOG(logger::ll_debug, "Failed to place packet in shared memory");
+
+					free(wrapped);
+
+					delete [] complete_msg;
+				}
 			}
 
 			free(pending_msg_meta->queued_msg);
@@ -214,8 +248,14 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 			continue;
 		}
 
-		auto from_msg_nr = start_resolve_by_ip4(shm_resolver_replies, resolver_name, addr_mac(from, 6));
-		auto to_msg_nr   = start_resolve_by_ip4(shm_resolver_replies, resolver_name, addr_mac(to,   6));
+		if (from_len != 4 || to_len != 4) {
+			DOLOG(logger::ll_warning, "Unexpected from (%zu)/to (%zu) address size(s)", from_len, to_len);
+			free(m);
+			continue;
+		}
+
+		auto from_msg_nr = start_resolve_by_ip4(shm_resolver_replies, resolver_name, addr_ip4(from, 4));
+		auto to_msg_nr   = start_resolve_by_ip4(shm_resolver_replies, resolver_name, addr_ip4(to,   4));
 
 		if (from_msg_nr.has_value() && to_msg_nr.has_value())
 		{
