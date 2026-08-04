@@ -10,6 +10,7 @@
 #include <iniparser/iniparser.h>
 
 #include "utils/addresses.h"
+#include "utils/checksum.h"
 #include "utils/gen.h"
 #include "utils/log.h"
 #include "utils/net.h"
@@ -204,10 +205,14 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 					header[3] = pending_msg_meta->queued_msg->size;
 					header[8] = 63;  // TTL
 					header[9] = protocol;
-					// TODO checksum (10, 11)
+					// checksum @ (10, 11)
 					memcpy(&header[12], from, 4);
 					memcpy(&header[16], to,   4);
 					memcpy(&complete_msg[20], pl, pl_len);
+
+					uint16_t checksum = ip_checksum(reinterpret_cast<const uint16_t *>(&header[0]), 10);
+					header[10] = checksum >> 8;
+					header[11] = checksum;
 
 					auto *wrapped = wrap_message(
 							pending_msg_meta->from.value().length(), pending_msg_meta->from.value().get(),

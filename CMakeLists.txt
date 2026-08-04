@@ -59,6 +59,7 @@ add_executable(arp_server
 
 add_executable(ip4_server
 	src/ip4_server.cpp
+	src/utils/checksum.cpp
 	src/utils/net.cpp
 	src/utils/shm_message.cpp
 	src/utils/str.cpp
