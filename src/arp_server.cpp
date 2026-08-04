@@ -33,6 +33,7 @@ struct request {
 
 void push_resolver_reply(shm_message_queue *const shm_resolver, const std::string & to, const std::string & reply, const uint64_t msg_nr)
 {
+	DOLOG(logger::ll_debug, "Pushing reply \"%s\" to \"%s\"", reply.c_str(), to.c_str());
 	shm_message_queue::message *m_reply = allocate_shm_message(reply.size());
 	m_reply->type   = shm_message_queue::msg_reply;
 	m_reply->size   = reply.size();
@@ -102,6 +103,8 @@ void run_resolver(shm_message_queue *const shm_resolver, std::vector<request> *c
 			std::unique_lock<std::mutex> lck(requests_lock);
 			requests->push_back(r);
 		}
+
+		DOLOG(logger::ll_debug, "Sending ARP request");
 
 		uint8_t request[44] { 0 };
 		request[1] = 1;  // HTYPE Ethernet
