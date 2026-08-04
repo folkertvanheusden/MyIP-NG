@@ -71,7 +71,7 @@ void run_in(shm_message_queue *const shm, const std::string & out_name)
 
 				if (labs(tv.tv_sec - now_local / 1'000'000) < 3) {
 					uint64_t age = now_local - (tv.tv_sec * 1'000'000 + tv.tv_usec);
-					age_str += " (sent " + std::to_string(age) + "µs ago)";
+					age_str += " (sent " + std::to_string(age) + " µs ago)";
 				}
 			}
 
