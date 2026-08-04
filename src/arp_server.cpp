@@ -23,9 +23,149 @@ void sig_handler(int sig)
 	stop_flag = true;
 }
 
+struct request {
+	// one must be filled
+	std::optional<addr_mac> mac;
+	std::optional<addr_ip4> ip4;
+	std::string searched_by;
+	uint64_t    msg_nr;
+};
+
+void push_resolver_reply(shm_message_queue *const shm_resolver, const std::string & to, const std::string & reply, const uint64_t msg_nr)
+{
+	shm_message_queue::message *m_reply = allocate_shm_message(reply.size());
+	m_reply->type   = shm_message_queue::msg_reply;
+	m_reply->size   = reply.size();
+	m_reply->msg_nr = msg_nr;
+	memcpy(m_reply->data, reply.c_str(), m_reply->size);
+	shm_resolver->send_message(to, m_reply, false);
+	free(m_reply);
+}
+
+void run_resolver(shm_message_queue *const shm_resolver, std::vector<request> *const requests, std::mutex & requests_lock,
+		  const std::set<addr_ip4, decltype(set_cmp)> & ip4_list, std::mutex & ip4_lock,
+		  const addr_mac & mac,                                   std::mutex & mac_lock,
+		  const std::string & out_name)
+{
+	while(!stop_flag) {
+		shm_message_queue::message *m = shm_resolver->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
+		if (!m)
+			continue;
+
+		std::string kv(reinterpret_cast<const char *>(m->data), m->size);
+		auto parts = split(kv, "=");
+		if (parts.size() != 2) {
+			DOLOG(logger::ll_error, "Not a command pair via shared configuration memory (%s)", kv.c_str());
+			free(m);
+			continue;
+		}
+
+		mac_lock.lock();
+		addr_mac SHA = mac;
+		mac_lock.unlock();
+		addr_ip4 SPA(4);
+		addr_mac THA(bc_addr, 6);
+		addr_ip4 TPA(4);
+
+		request r;
+
+		if (parts[0] == "search-mac") {  // search MAC by IP4
+			r.ip4 = addr_ip4(parts[1], ".", false);
+			SPA   = r.ip4.value();
+			TPA   = SPA;
+
+			// if me, return right away
+			{
+				std::unique_lock<std::mutex> lck(ip4_lock);
+				if (ip4_list.find(r.ip4.value()) != ip4_list.end()) {
+					lck.unlock();
+					auto reply = "ip4:" + r.ip4.value().to_str('.', false) + "=mac:" + SHA.to_str(':', true);
+					push_resolver_reply(shm_resolver, m->sender, reply, m->msg_nr);
+					free(m);
+					continue;
+				}
+			}
+		}
+		else if (parts[0] == "search-ip4") {  // search IP4 by MAC
+			r.mac = addr_mac(parts[1], ":", true);
+			SHA   = r.mac.value();
+		}
+		else {
+			DOLOG(logger::ll_error, "Invalid command (%s)", kv.c_str());
+			free(m);
+			continue;
+		}
+
+		r.searched_by = m->sender;
+
+		{
+			std::unique_lock<std::mutex> lck(requests_lock);
+			requests->push_back(r);
+		}
+
+		uint8_t request[44] { 0 };
+		request[1] = 1;  // HTYPE Ethernet
+		request[2] = 0x08;  // PTYPE IP4
+		request[3] = 0x00;
+		request[4] = 6;  // HLEN (Ethernet)
+		request[5] = 4;  // PLEN (IP4)
+		request[6] = 0x00;  // OPER
+		request[7] = 1;
+
+		int sha_offset = 8;
+		int spa_offset = 8 + 6;
+		int tha_offset = spa_offset + 4;
+		int tpa_offset = tha_offset + 6;
+
+		SHA.get(&request[sha_offset]);
+		SPA.get(&request[spa_offset]);
+		THA.get(&request[tha_offset]);  // target = bc_addr
+		TPA.get(&request[tpa_offset]);
+
+		shm_message_queue::message *m_out = wrap_message(
+					SHA.length(),   SHA.get(),
+					sizeof bc_addr, bc_addr,
+                                        sizeof request, request,
+					{ });
+		// send request to link layer
+		shm_resolver->send_message(out_name, m_out, false);
+		free(m_out);
+
+		free(m);
+	}
+}
+
+void register_resolve_reply(shm_message_queue *const shm_resolver,
+		            std::vector<request> *const requests, std::mutex & requests_lock,
+			    const addr_mac & SHA, const addr_ip4 & SPA)
+{
+	std::unique_lock<std::mutex> lck(requests_lock);
+	for(size_t i=0; i<requests->size();) {
+		std::string reply;
+
+		auto & item = requests->at(i);
+		if (item.mac.has_value() && item.mac.value() == SHA) {
+			reply = "mac:" + item.mac.value().to_str(':', true) + "=ip4:" + SPA.to_str('.', false);
+		}
+		else if (item.ip4.has_value() && item.ip4.value() == SPA) {
+			reply = "ip4:" + item.ip4.value().to_str('.', false) + "=mac:" + SHA.to_str(':', true);
+		}
+
+		if (reply.empty() == false) {
+			push_resolver_reply(shm_resolver, item.searched_by, reply, item.msg_nr);
+			requests->erase(requests->begin() + i);
+		}
+		else {
+			i++;
+		}
+	}
+}
+
 void run_in(shm_message_queue *const shm,
 	    const addr_mac & mappings_in,                               std::mutex & mac_lock,
-            const std::set<addr_ip4, decltype(set_cmp)> & mappings_out, std::mutex & ip4_lock)
+            const std::set<addr_ip4, decltype(set_cmp)> & mappings_out, std::mutex & ip4_lock,
+	    std::vector<request> *const requests,                       std::mutex & requests_lock,
+	    shm_message_queue *const shm_resolver)
 {
 	while(!stop_flag) {
 		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
@@ -116,10 +256,10 @@ void run_in(shm_message_queue *const shm,
 					// MAC address
 					{
 						std::unique_lock<std::mutex> lck(mac_lock);
-						mappings_in.get(&payload_out[8]);
+						mappings_in.get(&payload_out[8]);  // me
 					}
 					SPA.get(&payload_out[24]);  // who will receive
-					TPA.get(&payload_out[14]);  // who will sent
+					TPA.get(&payload_out[14]);  // who will sent [mne]
 					assert(SPA != TPA);
 
 					// push to Ethernet
@@ -145,6 +285,10 @@ void run_in(shm_message_queue *const shm,
 				}
 			}
 			else if (operation == 2) {  // reply
+				addr_mac SHA(pl +  8, 6);
+				addr_ip4 SPA(pl + 14, 4);
+
+				register_resolve_reply(shm_resolver, requests, requests_lock, SHA, SPA);
 			}
 			else {
 				DOLOG(logger::ll_debug, "arp unexpected operation (%u)", operation);
@@ -197,12 +341,17 @@ void run_cfg(addr_mac & mappings_in,                               std::mutex & 
 void run(shm_message_queue *const shm,
          addr_mac & mac,                                   std::mutex & mac_lock,
          std::set<addr_ip4, decltype(set_cmp)> & ip4_list, std::mutex & ip4_lock,
-	 shm_message_queue *const shm_cfg)
+	 shm_message_queue *const shm_cfg,
+	 std::vector<request> *const requests, std::mutex & requests_lock,
+	 shm_message_queue *const shm_resolver,
+	 const std::string & out_name)
 {
+	std::thread res([&] { run_resolver(shm_resolver, requests, requests_lock, ip4_list, ip4_lock, mac, mac_lock, out_name); });
 	std::thread cfg([&] { run_cfg(mac, mac_lock, ip4_list, ip4_lock, shm_cfg); });
-	std::thread rx ([&] { run_in (shm, mac, mac_lock, ip4_list, ip4_lock    ); });
+	std::thread rx ([&] { run_in (shm, mac, mac_lock, ip4_list, ip4_lock, requests, requests_lock, shm_resolver); });
 	rx.join();
 	cfg.join();
+	res.join();
 }
 
 int main(int argc, char *argv[])
@@ -239,6 +388,16 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"cfg-name\" under \"global\" missing\n");
 		return 1;
 	}
+	std::string out_name = iniparser_getstring(d, "global:out-name",  "");
+	if (out_name.empty()) {
+		fprintf(stderr, "\"out-name\" under \"global\" missing\n");
+		return 1;
+	}
+	std::string resolver_name = iniparser_getstring(d, "specific:resolver-name",  "");
+	if (resolver_name.empty()) {
+		fprintf(stderr, "\"resolver-name\" under \"specific\" missing\n");
+		return 1;
+	}
 	int msg_queue_size = iniparser_getint(d, "specific:msg-queue-size", 0);
 	if (msg_queue_size == 0) {
 		msg_queue_size = 16384;
@@ -249,6 +408,9 @@ int main(int argc, char *argv[])
 	std::mutex m_out_lock;
 	std::set<addr_ip4, decltype(set_cmp)> ip4_list;
 	iniparser_freedict(d);
+
+	std::vector<request> requests;
+	std::mutex           requests_lock;
 
 	signal(SIGINT, sig_handler);
 
@@ -264,7 +426,13 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	run(&shm, mac, m_in_lock, ip4_list, m_out_lock, &shm_cfg);
+	shm_message_queue shm_resolver(resolver_name, msg_queue_size);
+	if (shm_resolver.begin() == false) {
+		fprintf(stderr, "Cannot initialize shared memory segment for resolver channel\n");
+		return 1;
+	}
+
+	run(&shm, mac, m_in_lock, ip4_list, m_out_lock, &shm_cfg, &requests, requests_lock, &shm_resolver, out_name);
 
 	return 0;
 }
