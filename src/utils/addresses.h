@@ -16,6 +16,11 @@ struct addr {
 	addr() {  // for comparator
 	}
 
+	addr(const size_t len_in) {
+		a_len = len_in;
+		a = new uint8_t[a_len]();
+	}
+
 	addr(const std::string & what, const std::string & seperator, const bool is_hex) {
 		auto parts = split(what, seperator);
 		a_len = parts.size();
