@@ -79,6 +79,8 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 			else {
 				// TODO fragmentation
 
+				// TODO check checksum
+
 				// wrap IP4
 				auto *wrapped = wrap_message(
 					  ip4_src.length(), ip4_src.get(),
