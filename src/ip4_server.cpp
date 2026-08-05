@@ -106,7 +106,7 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 		}
 		else if (it == mappings_in.end()) {
 			DOLOG(logger::ll_debug, "Protocol %d not known", protocol);
-			send_icmp_error(shm, icmp_error_name, 3, 3, { pl, pl_len }, ip4_src, ip4_dst);
+			send_icmp_error(shm, icmp_error_name, 3, 2, { pl, pl_len }, ip4_src, ip4_dst);
 		}
 		else {
 			DOLOG(logger::ll_debug, "IP4 packet (IN) from %s to %s put in SHM for processing",
