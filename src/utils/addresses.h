@@ -60,6 +60,7 @@ struct addr {
 	}
 
 	addr & operator=(const addr & input) {
+		delete [] a;
 		a = new uint8_t[input.a_len];
 		memcpy(a, input.a, input.a_len);
 		a_len = input.a_len;
