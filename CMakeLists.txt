@@ -83,10 +83,17 @@ add_executable(udp_server
 	src/utils/shm_message.cpp
 	)
 
+add_executable(ntp_server
+	src/ntp_server.cpp
+	src/utils/net.cpp
+	src/utils/shm_message.cpp
+	)
+
 target_link_libraries(arp_server shm log)
 target_link_libraries(arp_test shm log)
 target_link_libraries(icmp_server shm log)
 target_link_libraries(ip4_server shm log)
+target_link_libraries(ntp_server shm log)
 target_link_libraries(promiscuous_server shm log)
 target_link_libraries(shm_test shm log)
 target_link_libraries(shm_test2 shm log)
@@ -110,6 +117,9 @@ target_compile_options(icmp_server PUBLIC ${INI_CFLAGS_OTHER})
 target_link_libraries(ip4_server ${INI_LIBRARIES})
 target_include_directories(ip4_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(ip4_server PUBLIC ${INI_CFLAGS_OTHER})
+target_link_libraries(ntp_server ${INI_LIBRARIES})
+target_include_directories(ntp_server PUBLIC ${INI_INCLUDE_DIRS})
+target_compile_options(ntp_server PUBLIC ${INI_CFLAGS_OTHER})
 target_link_libraries(promiscuous_server ${INI_LIBRARIES})
 target_include_directories(promiscuous_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(promiscuous_server PUBLIC ${INI_CFLAGS_OTHER})
