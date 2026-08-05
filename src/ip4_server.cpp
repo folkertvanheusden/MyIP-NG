@@ -434,7 +434,7 @@ void load_mappings(std::map<uint8_t, std::string> *const mappings_in, std::map<s
 			fprintf(stderr, "Mapping \"%s\" is invalid\n", keys[i]);
 			exit(1);
 		}
-		uint16_t    k   = std::stoi(col + 1, nullptr, 16);
+		uint16_t    k   = std::stoi(col + 1);
 		mappings_in ->insert({ k, v });
 		mappings_out->insert({ v, k });
 	}
