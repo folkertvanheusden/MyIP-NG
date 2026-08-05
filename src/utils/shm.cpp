@@ -195,7 +195,7 @@ bool shm_message_queue::send_message(const std::string & remote_identifier, mess
 	}
 
 	auto *put_shm = reinterpret_cast<shared_memory *>(mmap(nullptr, segment_stat.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, put_segment, 0));
-	if (get_shm == MAP_FAILED) {
+	if (put_shm == MAP_FAILED) {
 		DOLOG(logger::ll_error, "mmap failed: %s", strerror(errno));
 		close(put_segment);
 		return false;
