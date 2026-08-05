@@ -96,7 +96,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 	}
 }
 
-void run_out(shm_message_queue *const shm, const std::string & out_name)
+void run_out(shm_message_queue *const shm, const std::string & out_name, shm_message_queue *const shm_out)
 {
 	while(!stop_flag) {
 		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
@@ -141,7 +141,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name)
                                 udp_packet_len, udp_packet,
                                 { });
 
-                if (shm->send_message(out_name, wrapped, false) == false)
+                if (shm_out->send_message(out_name, wrapped, false) == false)
                         DOLOG(logger::ll_warning, "Cannot send to %s", out_name.c_str());
 
                 free(wrapped);
@@ -152,12 +152,12 @@ void run_out(shm_message_queue *const shm, const std::string & out_name)
 	}
 }
 
-
 void run(shm_message_queue *const shm, const std::string & out_name,
-	 const std::map<uint16_t, std::string> & mappings_in)
+	 const std::map<uint16_t, std::string> & mappings_in,
+	 shm_message_queue *const shm_upper)
 {
-	std::thread rx([&] { run_in (shm, mappings_in); });
-	std::thread tx([&] { run_out(shm, out_name   ); });  // TODO
+	std::thread rx([&] { run_in (shm, mappings_in);         });
+	std::thread tx([&] { run_out(shm_upper, out_name, shm); });
 	tx.join();
 	rx.join();
 }
@@ -214,6 +214,11 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"lower-in-name\" under \"global\" missing\n");
 		return 1;
 	}
+	std::string name_upper = iniparser_getstring(d, "global:name-upper",  "");
+	if (name_upper.empty()) {
+		fprintf(stderr, "\"name-upper\" under \"global\" missing\n");
+		return 1;
+	}
 	std::string out_name = iniparser_getstring(d, "global:out-name",  "");
 	if (out_name.empty()) {
 		fprintf(stderr, "\"out-name\" under \"global\" missing\n");
@@ -236,7 +241,13 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	run(&shm, out_name, mappings_in);
+	shm_message_queue shm_upper(name_upper, msg_queue_size);
+	if (shm_upper.begin() == false) {
+		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", name_upper.c_str());
+		return 1;
+	}
+
+	run(&shm, out_name, mappings_in, &shm_upper);
 
 	return 0;
 }
