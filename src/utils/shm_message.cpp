@@ -70,7 +70,7 @@ bool unwrap_message(const std::pair<const uint8_t *, size_t> & in,
 		return false;
 	*from_len = get_uint16(&payload[offset]);
 	offset += 2;
-	if (offset + *from_len >= in.second)
+	if (offset + *from_len > in.second)
 		return false;
 	*from = &payload[offset];
 	offset += *from_len;
@@ -79,7 +79,7 @@ bool unwrap_message(const std::pair<const uint8_t *, size_t> & in,
 		return false;
 	*to_len = get_uint16(&payload[offset]);
 	offset += 2;
-	if (offset + *to_len >= in.second)
+	if (offset + *to_len > in.second)
 		return false;
 	*to = &payload[offset];
 	offset += *to_len;
