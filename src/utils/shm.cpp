@@ -77,11 +77,25 @@ bool shm_message_queue::begin()
 		pthread_mutexattr_setrobust (&mutex_attr, PTHREAD_MUTEX_ROBUST  );
 		pthread_mutex_init(&get_shm->mutex, &mutex_attr);
 		pthread_mutexattr_destroy(&mutex_attr);
-
-		get_shm->total_size         = size;
-		get_shm->filled             = 0;
-		get_shm->most_recent_msg_nr = 0;
 	}
+
+	if (int err = pthread_mutex_lock(&get_shm->mutex); err != 0) {
+		if (err == EOWNERDEAD) {
+			DOLOG(logger::ll_error, "pthread_mutex_lock returned EOWNERDEAD, \"repairing\" mutex...");
+			pthread_mutex_consistent(&get_shm->mutex);
+		}
+		else {
+			DOLOG(logger::ll_error, "pthread_mutex_lock failed: %s", strerror(err));
+			return false;
+		}
+	}
+
+	get_shm->total_size         = size;
+	get_shm->filled             = 0;
+	get_shm->most_recent_msg_nr = 0;
+
+	if (int err = pthread_mutex_unlock(&get_shm->mutex); err != 0)
+		DOLOG(logger::ll_error, "pthread_mutex_unlock failed: %s", strerror(err));
 
 	return true;
 }
