@@ -48,6 +48,7 @@ int open_tap(const std::string & device_name, const int mtu_size)
 
 	if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1) {
 		DOLOG(logger::ll_error, "fcntl(FD_CLOEXEC) failed: %s", strerror(errno));
+		close(fd);
 		return -1;
 	}
 
@@ -56,12 +57,14 @@ int open_tap(const std::string & device_name, const int mtu_size)
 	set_ifr_name(&ifr_tap, device_name);
 	if (ioctl(fd, TUNSETIFF, &ifr_tap) == -1) {
 		DOLOG(logger::ll_error, "ioctl TUNSETIFF(%s) failed: %s", device_name.c_str(), strerror(errno));
+		close(fd);
 		return -1;
 	}
 
 	// MyIP calcs checksums by itself
 	if (ioctl(fd, TUNSETNOCSUM, 1) == -1) {
 		DOLOG(logger::ll_error, "ioctl TUNSETNOCSUM: %s", strerror(errno));
+		close(fd);
 		return -1;
 	}
 
