@@ -51,11 +51,11 @@ struct addr {
 		delete [] a;
 	}
 
-	bool operator!=(const addr & input) {
+	bool operator!=(const addr & input) const {
 		return memcmp(a, input.a, a_len) != 0;
 	}
 
-	bool operator==(const addr & input) {
+	bool operator==(const addr & input) const {
 		return memcmp(a, input.a, a_len) == 0;
 	}
 
