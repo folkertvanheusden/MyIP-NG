@@ -160,7 +160,7 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 	     shm_message_queue *const shm_upper_in)
 {
 	struct pending_msg {
-		uint64_t ts;  // when it was placed in the queue
+		uint64_t ts;  // when it was placed in the queue, microseconds since epoch
 		shm_message_queue::message *queued_msg;
 		uint64_t                from_nr;
 		std::optional<addr_mac> from;
@@ -185,6 +185,37 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 	std::mutex pending_messages_lock;
 
 	// TODO cleaner thread
+	std::thread th_cleaner([&] {
+		int sleep_count = 0;
+		while(!stop_flag) {
+			if (++sleep_count < 10) {
+				usleep(100'000);
+				continue;
+			}
+			sleep_count = 0;
+
+			std::set<uint64_t> erase_keys;
+
+			uint64_t now = get_us();
+			std::unique_lock<std::mutex> lck(pending_messages_lock);
+			for(auto & it: pending_messages) {
+				if (erase_keys.find(it.first) != erase_keys.end())
+					continue;
+
+				if (now - it.second->ts >= 2'500'000) {
+					free(it.second->queued_msg);
+					erase_keys.insert(it.second->from_nr);
+					erase_keys.insert(it.second->to_nr  );
+				}
+			}
+
+			if (erase_keys.empty() == false)
+				DOLOG(logger::ll_debug, "Forgetting %zu request-records", erase_keys.size());
+
+			for(auto & key: erase_keys)
+				pending_messages.erase(key);
+		}
+	});
 
 	std::thread th_sender([&] {
 		while(!stop_flag) {
@@ -193,6 +224,7 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 				continue;
 
 			// find record for this parameter
+			std::unique_lock<std::mutex> lck(pending_messages_lock);
 			auto it = pending_messages.find(resolve_result->msg_nr);
 			if (it == pending_messages.end()) {
 				DOLOG(logger::ll_error, "Request-record for message from \"%s\" cannot be found", resolve_result->sender);
@@ -342,7 +374,8 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 		}
 	}
 
-	th_sender.join();
+	th_sender .join();
+	th_cleaner.join();
 }
 
 void announcer(shm_message_queue *const shm, const std::string & announce_ip4_addr, const addr_ip4 & addr)
