@@ -184,7 +184,7 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 	std::map<uint64_t, pending_msg *> pending_messages;
 	std::mutex pending_messages_lock;
 
-	// TODO cleaner thread
+	// cleaner thread
 	std::thread th_cleaner([&] {
 		int sleep_count = 0;
 		while(!stop_flag) {
