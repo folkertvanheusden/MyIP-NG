@@ -27,8 +27,32 @@ void sig_handler(int sig)
 	stop_flag = true;
 }
 
+void send_icmp_error(shm_message_queue *const shm, const std::string & icmp_error_name, const int type, const int code, const std::pair<const uint8_t *, size_t> & payload, const addr_ip4 & to, const addr_ip4 & me)
+{
+	size_t   extra_data_len = 2 + payload.second;
+	uint8_t *extra_data     = new uint8_t[extra_data_len];
+	extra_data[0] = type;
+	extra_data[1] = code;
+	memcpy(&extra_data[2], payload.first, payload.second);
+
+	auto *wrapped = wrap_message(
+			me.length(), me.get(),
+			to.length(), to.get(),
+			extra_data_len, extra_data,
+			{ });
+
+	if (shm->send_message(icmp_error_name, wrapped, false) == false)
+		DOLOG(logger::ll_warning, "Cannot send ICMP message");
+	else
+		DOLOG(logger::ll_warning, "ICMP message type %d code %d queued", type, code);
+
+	free(wrapped);
+
+	delete [] extra_data;
+}
+
 void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & listen_addr,
-            const std::map<uint8_t, std::string> & mappings_in, const std::string & icmp_name)
+            const std::map<uint8_t, std::string> & mappings_in, const std::string & icmp_error_name)
 {
 	while(!stop_flag) {
 		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
@@ -49,54 +73,61 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 
 		if (pl_len < 20) {
 			DOLOG(logger::ll_debug, "IP4 payload < 20 bytes");
+			free(m);
+			continue;
 		}
-		else if (int version = pl[0] >> 4; version != 0x04) {
+
+		addr_ip4 ip4_src(&pl[12], 4);
+		addr_ip4 ip4_dst(&pl[16], 4);  // me
+
+		int header_size = (pl[0] & 15) * 4;
+		int ip_size     = (pl[2] << 8) | pl[3];
+		int protocol    = pl[9];
+
+		auto it = mappings_in.find(protocol);
+
+		if (int version = pl[0] >> 4; version != 0x04) {
 			DOLOG(logger::ll_debug, "Not an IP4 packet");
 		}
-		else if (pl[8] <= 1) {  // TTL exceeded?
+		else if (ip4_dst != listen_addr.first) {
+			DOLOG(logger::ll_debug, "%s is not for this instance", ip4_dst.to_str('.', false).c_str());
+		}
+		else if (header_size > ip_size) {
+			DOLOG(logger::ll_debug, "Invalid IP4 header size");
+			send_icmp_error(shm, icmp_error_name, 12, 2, { pl, pl_len }, ip4_src, ip4_dst);
+		}
+		else if (ip_size > ssize_t(pl_len)) {
+			DOLOG(logger::ll_debug, "Invalid IP4 payload size");
+			send_icmp_error(shm, icmp_error_name, 12, 2, { pl, pl_len }, ip4_src, ip4_dst);
+		}
+		else if (pl[8] == 0) {  // TTL exceeded?
 			DOLOG(logger::ll_debug, "TTL exceeded");
+			send_icmp_error(shm, icmp_error_name, 11, 0, { pl, pl_len }, ip4_src, ip4_dst);
+		}
+		else if (it == mappings_in.end()) {
+			DOLOG(logger::ll_debug, "Protocol %d not known", protocol);
+			send_icmp_error(shm, icmp_error_name, 3, 3, { pl, pl_len }, ip4_src, ip4_dst);
 		}
 		else {
-			int header_size = (pl[0] & 15) * 4;
-			int ip_size     = (pl[2] << 8) | pl[3];
-			int protocol    = pl[9];
+			DOLOG(logger::ll_debug, "IP4 packet (IN) from %s to %s put in SHM for processing",
+				ip4_src.to_str('.', false).c_str(),
+				ip4_dst.to_str('.', false).c_str());
 
-			auto it = mappings_in.find(protocol);
+			// TODO fragmentation
 
-			addr_ip4 ip4_src(&pl[12], 4);
-			addr_ip4 ip4_dst(&pl[16], 4);
+			// TODO check checksum
 
-			if (header_size > ip_size)
-				DOLOG(logger::ll_debug, "Invalid IP4 header size");
-			else if (ip_size > ssize_t(pl_len))
-				DOLOG(logger::ll_debug, "Invalid IP4 size");
-			else if (it == mappings_in.end()) {
-				DOLOG(logger::ll_debug, "Protocol %d not known", protocol);
-				// TODO send ICMP -> icmp_name
-			}
-			else if (ip4_dst != listen_addr.first)
-				DOLOG(logger::ll_debug, "%s is not for this instance", ip4_dst.to_str('.', false).c_str());
-			else {
-				DOLOG(logger::ll_debug, "IP4 packet (IN) from %s to %s put in SHM for processing",
-					ip4_src.to_str('.', false).c_str(),
-					ip4_dst.to_str('.', false).c_str());
+			// wrap IP4
+			auto *wrapped = wrap_message(
+				  ip4_src.length(), ip4_src.get(),
+				  ip4_dst.length(), ip4_dst.get(),
+				  ip_size - header_size, &pl[header_size],
+				  { });
 
-				// TODO fragmentation
+			if (shm->send_message(it->second, wrapped, false) == false)
+				DOLOG(logger::ll_warning, "Cannot send to %s", it->second.c_str());
 
-				// TODO check checksum
-
-				// wrap IP4
-				auto *wrapped = wrap_message(
-					  ip4_src.length(), ip4_src.get(),
-					  ip4_dst.length(), ip4_dst.get(),
-                                          ip_size - header_size, &pl[header_size],
-					  { });
-
-				if (shm->send_message(it->second, wrapped, false) == false)
-					DOLOG(logger::ll_warning, "Cannot send to %s", it->second.c_str());
-
-				free(wrapped);
-			}
+			free(wrapped);
 		}
 
 		free(m);
@@ -342,11 +373,11 @@ void run(shm_message_queue *const shm, const std::string & announce_ip4_addr, co
          const addr_ip4 & default_gw_addr,
          const std::map<uint8_t, std::string> & mappings_in,
          const std::map<std::string, uint8_t> & mappings_out,
-	 const std::string & icmp_name, const std::string & link_name,
+	 const std::string & icmp_error_name, const std::string & link_name,
 	 shm_message_queue *const shm_resolver_replies, const std::string & resolver_name,
 	 shm_message_queue *const upper_in)
 {
-	std::thread rx([&] { run_in (shm, listen_addr, mappings_in,  icmp_name); });
+	std::thread rx([&] { run_in (shm, listen_addr, mappings_in,  icmp_error_name); });
 	std::thread tx([&] { run_out(shm, listen_addr, default_gw_addr, mappings_out, link_name, shm_resolver_replies, resolver_name, upper_in); });
         std::thread announce([shm, announce_ip4_addr, listen_addr] { announcer(shm, announce_ip4_addr, listen_addr.first); });
         announce.join();
@@ -417,9 +448,9 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"out-name\" under \"global\" missing\n");
 		return 1;
 	}
-	std::string icmp_name = iniparser_getstring(d, "specific:icmp-name",  "");
-	if (icmp_name.empty()) {
-		fprintf(stderr, "\"icmp-name\" under \"specific\" missing\n");
+	std::string icmp_error_name = iniparser_getstring(d, "specific:icmp-error-name",  "");
+	if (icmp_error_name.empty()) {
+		fprintf(stderr, "\"icmp-error-name\" under \"specific\" missing\n");
 		return 1;
 	}
 	std::string resolver_name = iniparser_getstring(d, "specific:resolver-name",  "");
@@ -486,7 +517,7 @@ int main(int argc, char *argv[])
 	}
 
 	run(&shm, announce_ip4_addr, { listen_addr, cidr }, default_gw_addr, mappings_in, mappings_out,
-            icmp_name, out_name, &shm_resolver_replies, resolver_name, &shm_upper_in);
+            icmp_error_name, out_name, &shm_resolver_replies, resolver_name, &shm_upper_in);
 
 	return 0;
 }
