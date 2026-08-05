@@ -84,7 +84,7 @@ void run_in(shm_message_queue *const shm, const std::string & out_name)
 			msgout.mode            = 4; // 4: server
 			msgout.vn              = 3;
 			msgout.precision       = -18; // 3.8us
-			msgout.stratum         = 0;
+			msgout.stratum         = 1;
 			msgout.root_delay      = 369098752; // not known
 			msgout.root_dispersion = 369098752; // not known
 			msgout.poll            = 16;
@@ -115,6 +115,7 @@ void run_in(shm_message_queue *const shm, const std::string & out_name)
 			uint8_t *m_out            = new uint8_t[udp_message_size];
 			put_uint16(&m_out[0], destination_port);  // swapped as it is a reply
 			put_uint16(&m_out[2], source_port     );
+			memcpy(&m_out[4], &msgout, sizeof msgout);
 
 			auto *wrapped = wrap_message(
 					to_len,           to,  // swapped as it is as reply
