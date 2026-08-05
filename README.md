@@ -1,0 +1,4 @@
+## requirements
+
+* libiniparser-dev
+* cmake
