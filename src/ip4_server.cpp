@@ -286,7 +286,6 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 
 		uint32_t to_word = (to[0] << 24) | (to[1] << 16) | (to[2] << 8) | to[3];
 		addr_ip4 via     = addr_ip4(to, 4);
-		printf("%08x %08x %08x\n", to_word, masks[listen_addr.second], listen_cidr_word);
 		if ((to_word & masks[listen_addr.second]) != listen_cidr_word) {
 			DOLOG(logger::ll_debug, "Route %s via %s", via.to_str('.', false).c_str(), default_gw_addr.to_str('.', false).c_str());
 			via = default_gw_addr;
