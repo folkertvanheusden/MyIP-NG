@@ -123,6 +123,7 @@ std::optional<uint64_t> start_resolve_by_ip4(shm_message_queue *const shm_resolv
 
 // any messages from something sent to this server to be sent out via its parent?
 void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & listen_addr,
+	     const addr_ip4 & default_gw_addr,
              const std::map<std::string, uint8_t> & mappings_out, const std::string & link_name,
 	     shm_message_queue *const shm_resolver_replies, const std::string & resolver_name,
 	     shm_message_queue *const shm_upper_in)
@@ -135,6 +136,19 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 		uint64_t                to_nr;
 		std::optional<addr_mac> to;
 	};
+
+	uint32_t masks[32] { };
+	uint32_t mask_value = 0;
+	for(int i=0; i<32; i++) {
+		masks[i] = mask_value;
+		mask_value >>= 1;
+		mask_value |= 0x8000'0000;
+	}
+
+	const uint8_t *listen_addr_bytes = listen_addr.first.get();
+	const uint32_t listen_addr_word  = (listen_addr_bytes[0] << 24) | (listen_addr_bytes[1] << 16) |
+		(listen_addr_bytes[2] << 8) | listen_addr_bytes[3];
+	const uint32_t listen_cidr_word  = listen_addr_word & masks[listen_addr.second];
 
 	std::map<uint64_t, pending_msg *> pending_messages;
 	std::mutex pending_messages_lock;
@@ -269,7 +283,16 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 		}
 
 		auto from_msg_nr = start_resolve_by_ip4(shm_resolver_replies, resolver_name, addr_ip4(from, 4));
-		auto to_msg_nr   = start_resolve_by_ip4(shm_resolver_replies, resolver_name, addr_ip4(to,   4));
+
+		uint32_t to_word = (to[0] << 24) | (to[1] << 16) | (to[2] << 8) | to[3];
+		addr_ip4 via     = addr_ip4(to, 4);
+		printf("%08x %08x %08x\n", to_word, masks[listen_addr.second], listen_cidr_word);
+		if ((to_word & masks[listen_addr.second]) != listen_cidr_word) {
+			DOLOG(logger::ll_debug, "Route %s via %s", via.to_str('.', false).c_str(), default_gw_addr.to_str('.', false).c_str());
+			via = default_gw_addr;
+		}
+
+		auto to_msg_nr   = start_resolve_by_ip4(shm_resolver_replies, resolver_name, via);
 
 		if (from_msg_nr.has_value() && to_msg_nr.has_value())
 		{
@@ -317,6 +340,7 @@ void announcer(shm_message_queue *const shm, const std::string & announce_ip4_ad
 }
 
 void run(shm_message_queue *const shm, const std::string & announce_ip4_addr, const std::pair<addr_ip4, int> & listen_addr,
+         const addr_ip4 & default_gw_addr,
          const std::map<uint8_t, std::string> & mappings_in,
          const std::map<std::string, uint8_t> & mappings_out,
 	 const std::string & icmp_name, const std::string & link_name,
@@ -324,7 +348,7 @@ void run(shm_message_queue *const shm, const std::string & announce_ip4_addr, co
 	 shm_message_queue *const upper_in)
 {
 	std::thread rx([&] { run_in (shm, listen_addr, mappings_in,  icmp_name); });
-	std::thread tx([&] { run_out(shm, listen_addr, mappings_out, link_name, shm_resolver_replies, resolver_name, upper_in); });
+	std::thread tx([&] { run_out(shm, listen_addr, default_gw_addr, mappings_out, link_name, shm_resolver_replies, resolver_name, upper_in); });
         std::thread announce([shm, announce_ip4_addr, listen_addr] { announcer(shm, announce_ip4_addr, listen_addr.first); });
         announce.join();
         tx.join();
@@ -419,6 +443,12 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"listen-addr\" under \"specific\" missing\n");
 		return 1;
 	}
+	std::string default_gw_addr_str = iniparser_getstring(d, "specific:default-gw",  "");
+	if (default_gw_addr_str.empty()) {
+		fprintf(stderr, "\"default-gw\" under \"specific\" missing\n");
+		return 1;
+	}
+	addr_ip4 default_gw_addr(default_gw_addr_str, ".", false);
 	auto slash = listen_addr_str.find('/');
 	if (slash == std::string::npos) {
 		fprintf(stderr, "\"listen-addr\": CIDR missing\n");
@@ -456,7 +486,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	run(&shm, announce_ip4_addr, { listen_addr, cidr }, mappings_in, mappings_out,
+	run(&shm, announce_ip4_addr, { listen_addr, cidr }, default_gw_addr, mappings_in, mappings_out,
             icmp_name, out_name, &shm_resolver_replies, resolver_name, &shm_upper_in);
 
 	return 0;
