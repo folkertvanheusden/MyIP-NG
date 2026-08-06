@@ -179,7 +179,8 @@ void run_in(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_ad
 			continue;
 		}
 
-		auto *msg = wrap_message(size, buffer,
+		auto *msg = wrap_message_up(
+				size, buffer,
 				6,         &buffer[ 6],  // from
 				6,         &buffer[ 0],  // to
 				size - 14, &buffer[14],  // payload
@@ -209,8 +210,7 @@ void run_out(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_a
 		const uint8_t *from         = nullptr;
 		const uint8_t *to           = nullptr;
 		const uint8_t *pl           = nullptr;
-		if (unwrap_message(m,
-                    &full_pkt_len, &full_pkt,
+		if (unwrap_message_down(m,
                     &from_len,     &from,
                     &to_len,       &to,
                     &pl_len,       &pl) == false) {

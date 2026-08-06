@@ -171,7 +171,8 @@ void run_in(shm_message_queue *const shm, const prom_handle & ph, const std::map
 			continue;
 		}
 
-		auto *msg = wrap_message(size, buffer,
+		auto *msg = wrap_message_up(
+				size,       buffer,
 				6,         &buffer[ 6],  // from
 				6,         &buffer[ 0],  // to
 				size - 14, &buffer[14],  // payload
@@ -193,16 +194,13 @@ void run_out(shm_message_queue *const shm, const prom_handle & ph, const std::ma
 		if (!m)
 			continue;
 
-		size_t         full_pkt_len = 0;
 		size_t         from_len     = 0;
 		size_t         to_len       = 0;
 		size_t         pl_len       = 0;
-		const uint8_t *full_pkt     = nullptr;
 		const uint8_t *from         = nullptr;
 		const uint8_t *to           = nullptr;
 		const uint8_t *pl           = nullptr;
-		if (unwrap_message(m,
-                    &full_pkt_len, &full_pkt,
+		if (unwrap_message_down(m,
                     &from_len,     &from,
                     &to_len,       &to,
                     &pl_len,       &pl) == false) {
@@ -211,7 +209,7 @@ void run_out(shm_message_queue *const shm, const prom_handle & ph, const std::ma
 			continue;
 		}
 
-		if (full_pkt_len != 0) {
+		if (pl_len != 0) {
 			DOLOG(logger::ll_error, "Unexpected full packet!");
 			free(m);
 			continue;
