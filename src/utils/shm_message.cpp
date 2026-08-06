@@ -37,10 +37,13 @@ std::pair<uint8_t *, size_t> wrap_message_up(
 
 	p->type         = 0xdeadbeef;
 	p->from_offset  = from - full_pkt;
+	assert(p->from_offset <= full_pkt_len - from_len);
 	p->from_len     = from_len;
 	p->to_offset    = to - full_pkt;
+	assert(p->to_offset <= full_pkt_len - to_len);
 	p->to_len       = to_len;
 	p->pl_offset    = pl - full_pkt;
+	assert(p->pl_offset <= full_pkt_len - pl_len);
 	p->pl_len       = pl_len;
 	p->full_pkt_len = full_pkt_len;
 	memcpy(p->full_pkt, full_pkt, full_pkt_len);
