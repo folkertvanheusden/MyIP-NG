@@ -8,13 +8,10 @@
 struct wrapped_up {
 	uint32_t type;  // 0xdeadbeef
 	size_t  full_pkt_len;
-	size_t  from_offset;
 	size_t  from_len;
-	size_t  to_offset;
 	size_t  to_len;
-	size_t  pl_offset;
 	size_t  pl_len;
-	uint8_t full_pkt[0];
+	uint8_t data[0];
 } __attribute__((__packed__));
 
 struct wrapped_down {
@@ -31,22 +28,19 @@ std::pair<uint8_t *, size_t> wrap_message_up(
 		const size_t to_len,       const uint8_t *const to,
 		const size_t pl_len,       const uint8_t *const pl)
 {
-	size_t      total_length = sizeof(wrapped_up) + full_pkt_len;
+	size_t      total_length = sizeof(wrapped_up) + from_len + to_len + pl_len + full_pkt_len;
 	uint8_t    *data         = reinterpret_cast<uint8_t *>(malloc(total_length));
 	wrapped_up *p            = reinterpret_cast<wrapped_up *>(data);
 
 	p->type         = 0xdeadbeef;
-	p->from_offset  = from - full_pkt;
-	assert(p->from_offset <= full_pkt_len - from_len);
-	p->from_len     = from_len;
-	p->to_offset    = to - full_pkt;
-	assert(p->to_offset <= full_pkt_len - to_len);
-	p->to_len       = to_len;
-	p->pl_offset    = pl - full_pkt;
-	assert(p->pl_offset <= full_pkt_len - pl_len);
-	p->pl_len       = pl_len;
 	p->full_pkt_len = full_pkt_len;
-	memcpy(p->full_pkt, full_pkt, full_pkt_len);
+	p->from_len     = from_len;
+	p->to_len       = to_len;
+	p->pl_len       = pl_len;
+	memcpy(&p->data[0],                          from,     from_len    );
+	memcpy(&p->data[from_len],                   to,       to_len      );
+	memcpy(&p->data[from_len + to_len],          pl,       pl_len      );
+	memcpy(&p->data[from_len + to_len + pl_len], full_pkt, full_pkt_len);
 
 	return { data, total_length };
 }
@@ -87,16 +81,16 @@ bool unwrap_message_up(
 	assert(p->type == 0xdeadbeef);
 
 	*from_len =  p->from_len;
-	*from     = &p->full_pkt[p->from_offset];
+	*from     = &p->data[0];
 
-	*to_len =  p->to_len;
-	*to     = &p->full_pkt[p->to_offset];
+	*to_len   =  p->to_len;
+	*to       = &p->data[*from_len];
 
-	*pl_len =  p->pl_len;
-	*pl     = &p->full_pkt[p->pl_offset];
+	*pl_len   =  p->pl_len;
+	*pl       = &p->data[*from_len + *to_len];
 
-	*full_pkt_len = p->full_pkt_len;
-	*full_pkt     = p->full_pkt;
+	*full_pkt_len =  p->full_pkt_len;
+	*full_pkt     = &p->data[*from_len + *to_len + *pl_len];
 
 	return true;
 }
@@ -173,11 +167,11 @@ bool unwrap_message_down(
 	*from_len =  p->from_len;
 	*from     = &p->data[0];
 
-	*to_len =  p->to_len;
-	*to     = &p->data[*from_len];
+	*to_len   =  p->to_len;
+	*to       = &p->data[*from_len];
 
-	*pl_len =  p->pl_len;
-	*pl     = &p->data[*from_len + *to_len];
+	*pl_len   =  p->pl_len;
+	*pl       = &p->data[*from_len + *to_len];
 
 	return true;
 }
