@@ -76,7 +76,11 @@ void run_in(shm_message_queue *const shm, const std::string & out_name)
 		const sntp_datagram *sntp = reinterpret_cast<const sntp_datagram *>(&pl[4]);
 
 		if (sntp->mode == 3) { // time request
-			DOLOG(logger::ll_debug, "NTP time request");
+			uint16_t source_port      = get_uint16(&pl[0]);
+			uint16_t destination_port = get_uint16(&pl[2]);
+
+			DOLOG(logger::ll_debug, "NTP time request from [%s]:%d",
+				addr_ip4(from, from_len).to_str('.', false).c_str(), source_port);
 
 			sntp_datagram msgout { 0 };
 
@@ -107,9 +111,6 @@ void run_in(shm_message_queue *const shm, const std::string & out_name)
 
 			msgout.transmit_timestamp_secs = htonl(now.tv_sec + NTP_EPOCH);
 			msgout.transmit_timestamp_fraq = htonl(now.tv_nsec / 1000 * 4295);
-
-			uint16_t source_port      = get_uint16(&pl[0]);
-			uint16_t destination_port = get_uint16(&pl[2]);
 
 			size_t   udp_message_size = 4 + sizeof msgout;
 			uint8_t *m_out            = new uint8_t[udp_message_size];
