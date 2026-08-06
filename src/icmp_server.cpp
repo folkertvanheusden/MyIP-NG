@@ -119,20 +119,22 @@ void run_err(shm_message_queue *const shm_err, const std::string & out_name, shm
 			continue;
 
 		// unwrap
-		size_t         from_len = 0;
-		size_t         to_len   = 0;
-		size_t         pl_len   = 0;
-		const uint8_t *from     = nullptr;
-		const uint8_t *to       = nullptr;
-		const uint8_t *pl       = nullptr;
-		if (unwrap_message_down(m_in, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
+                size_t         full_pkt_len = 0;
+                size_t         from_len     = 0;
+                size_t         to_len       = 0;
+                size_t         pl_len       = 0;
+                const uint8_t *full_pkt     = nullptr;
+                const uint8_t *from         = nullptr;
+                const uint8_t *to           = nullptr;
+                const uint8_t *pl           = nullptr;
+                if (unwrap_message_up(m_in, &full_pkt_len, &full_pkt, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
 			DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
 			free(m_in);
 			continue;
 		}
 
-		if (pl_len < 20) {
-			DOLOG(logger::ll_debug, "ICMP error handler: IP header too short? (%zu)", pl_len);
+		if (full_pkt_len < 20) {
+			DOLOG(logger::ll_debug, "ICMP error handler: IP header too short? (%zu, from %s)", full_pkt_len, m_in->sender);
 			free(m_in);
 			continue;
 		}
@@ -143,12 +145,12 @@ void run_err(shm_message_queue *const shm_err, const std::string & out_name, shm
 		DOLOG(logger::ll_debug, "Creating ICMP packet with type %d and code %d for %s", type, code, addr_ip4(to, to_len).to_str('.', false).c_str());
 
 		size_t ip_header_size    = (pl[2] & 15) * 4;
-		size_t copy_n            = std::min(pl_len - 2, ip_header_size + 64 / 8);
+		size_t copy_n            = std::min(full_pkt_len, ip_header_size + 64 / 8);
 		size_t icmp_message_size = 8 + copy_n;
 		uint8_t *m_out = new uint8_t[icmp_message_size]();
 		m_out[0] = type;
 		m_out[1] = code;
-		memcpy(&m_out[8], &pl[2], copy_n);
+		memcpy(&m_out[8], &full_pkt[0], copy_n);
 
 		uint16_t checksum_msg = ip_checksum(reinterpret_cast<const uint16_t *>(m_out), icmp_message_size / 2);
 		m_out[2] = checksum_msg >> 8;
