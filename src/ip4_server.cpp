@@ -27,18 +27,17 @@ void sig_handler(int sig)
 	stop_flag = true;
 }
 
-void send_icmp_error(shm_message_queue *const shm, const std::string & icmp_error_name, const int type, const int code, const std::pair<const uint8_t *, size_t> & payload, const addr_ip4 & to, const addr_ip4 & me)
+void send_icmp_error(shm_message_queue *const shm, const std::string & icmp_error_name, const int type, const int code, const std::pair<const uint8_t *, size_t> & full_pkt, const addr_ip4 & to, const addr_ip4 & me)
 {
-	size_t   extra_data_len = 2 + payload.second;
-	uint8_t *extra_data     = new uint8_t[extra_data_len];
+	uint8_t extra_data[2];
 	extra_data[0] = type;
 	extra_data[1] = code;
-	memcpy(&extra_data[2], payload.first, payload.second);
 
-	auto *wrapped = wrap_message(
-			me.length(), me.get(),
-			to.length(), to.get(),
-			extra_data_len, extra_data,
+	auto *wrapped = wrap_message_up(
+			full_pkt.second,   full_pkt.first,
+			me.length(),       me.get(),
+			to.length(),       to.get(),
+			sizeof extra_data, extra_data,
 			{ });
 
 	if (shm->send_message(icmp_error_name, wrapped, false) == false)
@@ -47,10 +46,9 @@ void send_icmp_error(shm_message_queue *const shm, const std::string & icmp_erro
 		DOLOG(logger::ll_warning, "ICMP message type %d code %d queued", type, code);
 
 	free(wrapped);
-
-	delete [] extra_data;
 }
 
+// Ethernet -> IP4
 void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & listen_addr,
             const std::map<uint8_t, std::string> & mappings_in, const std::string & icmp_error_name)
 {
@@ -59,13 +57,15 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 		if (!m)
 			continue;
 
-		size_t         from_len = 0;
-		size_t         to_len   = 0;
-		size_t         pl_len   = 0;
-		const uint8_t *from     = nullptr;
-		const uint8_t *to       = nullptr;
-		const uint8_t *pl       = nullptr;
-		if (unwrap_message(m, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
+		size_t         full_pkt_len = 0;
+		size_t         from_len     = 0;
+		size_t         to_len       = 0;
+		size_t         pl_len       = 0;
+		const uint8_t *full_pkt     = nullptr;
+		const uint8_t *from         = nullptr;
+		const uint8_t *to           = nullptr;
+		const uint8_t *pl           = nullptr;
+		if (unwrap_message_up(m, &full_pkt_len, &full_pkt, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
 			DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
 			free(m);
 			continue;
@@ -110,9 +110,10 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 			send_icmp_error(shm, icmp_error_name, 3, 2, { pl, pl_len }, ip4_src, ip4_dst);
 		}
 		else {
-			DOLOG(logger::ll_debug, "IP4 packet (IN) from %s to %s put in SHM for processing",
+			DOLOG(logger::ll_debug, "IP4 packet (IN) from %s to %s put in SHM %s for processing",
 				ip4_src.to_str('.', false).c_str(),
-				ip4_dst.to_str('.', false).c_str());
+				ip4_dst.to_str('.', false).c_str(),
+				it->second.c_str());
 
 			// TODO fragmentation
 			if (flags & 1) {
@@ -128,10 +129,11 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 				continue;
 			}
 
-			// wrap IP4
-			auto *wrapped = wrap_message(
-				  ip4_src.length(), ip4_src.get(),
-				  ip4_dst.length(), ip4_dst.get(),
+			// wrap IP4 to tcp/udp/etc
+			auto *wrapped = wrap_message_up(
+				  ip_size,                pl,
+				  ip4_src.length(),       ip4_src.get(),
+				  ip4_dst.length(),       ip4_dst.get(),
 				  ip_size - header_size, &pl[header_size],
 				  { });
 
@@ -164,6 +166,7 @@ std::optional<uint64_t> start_resolve_by_ip4(shm_message_queue *const shm_resolv
 }
 
 // any messages from something sent to this server to be sent out via its parent?
+// IP4 -> Ethernet
 void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & listen_addr,
 	     const addr_ip4 & default_gw_addr,
              const std::map<std::string, uint8_t> & mappings_out, const std::string & link_name,
@@ -284,15 +287,16 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 			else {
 				int protocol = protocol_it->second;
 
-				size_t         from_len = 0;
-				size_t         to_len   = 0;
-				size_t         pl_len   = 0;
-				const uint8_t *from     = nullptr;
-				const uint8_t *to       = nullptr;
-				const uint8_t *pl       = nullptr;
-				if (unwrap_message(pending_msg_meta->queued_msg, &from_len, &from, &to_len, &to, &pl_len, &pl) == false)
+				size_t         from_len     = 0;
+				size_t         to_len       = 0;
+				size_t         pl_len       = 0;
+				const uint8_t *from         = nullptr;
+				const uint8_t *to           = nullptr;
+				const uint8_t *pl           = nullptr;
+				if (unwrap_message_down(pending_msg_meta->queued_msg, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
 					DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
 					// goto should be an option here
+				}
 				else {
 					size_t   complete_msg_size = pl_len + 20;
 					uint8_t *complete_msg      = new uint8_t[complete_msg_size]();
@@ -312,7 +316,7 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 					header[10] = checksum >> 8;
 					header[11] = checksum;
 
-					auto *wrapped = wrap_message(
+					auto *wrapped = wrap_message_down(
 							pending_msg_meta->from.value().length(), pending_msg_meta->from.value().get(),
 							pending_msg_meta->to  .value().length(), pending_msg_meta->to  .value().get(),
 							complete_msg_size, complete_msg,
@@ -346,7 +350,7 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 		const uint8_t *from     = nullptr;
 		const uint8_t *to       = nullptr;
 		const uint8_t *pl       = nullptr;
-		if (unwrap_message(m, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
+		if (unwrap_message_down(m, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
 			DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
 			free(m);
 			continue;
