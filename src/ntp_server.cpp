@@ -55,17 +55,19 @@ void run_in(shm_message_queue *const shm, const std::string & out_name)
 			continue;
 
 		// unwrap
-		size_t         from_len = 0;
-		size_t         to_len   = 0;
-		size_t         pl_len   = 0;
-		const uint8_t *from     = nullptr;
-		const uint8_t *to       = nullptr;
-		const uint8_t *pl       = nullptr;
-		if (unwrap_message(m, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
-			DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
-			free(m);
-			continue;
-		}
+                size_t         full_pkt_len = 0;
+                size_t         from_len     = 0;
+                size_t         to_len       = 0;
+                size_t         pl_len       = 0;
+                const uint8_t *full_pkt     = nullptr;
+                const uint8_t *from         = nullptr;
+                const uint8_t *to           = nullptr;
+                const uint8_t *pl           = nullptr;
+                if (unwrap_message_up(m, &full_pkt_len, &full_pkt, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
+                        DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
+                        free(m);
+                        continue;
+                }
 
 		if (pl_len < 4 + 48) {
 			free(m);
@@ -118,7 +120,7 @@ void run_in(shm_message_queue *const shm, const std::string & out_name)
 			put_uint16(&m_out[2], source_port     );
 			memcpy(&m_out[4], &msgout, sizeof msgout);
 
-			auto *wrapped = wrap_message(
+			auto *wrapped = wrap_message_down(
 					to_len,           to,  // swapped as it is as reply
 					from_len,         from,
 					udp_message_size, m_out,
