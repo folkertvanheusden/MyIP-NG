@@ -12,7 +12,7 @@ int main(int argc, char *argv[])
 
 	uint8_t full_pkt[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
 
-	shm_message_queue::message *m = wrap_message(sizeof full_pkt, full_pkt,
+	shm_message_queue::message *m = wrap_message_up(sizeof full_pkt, full_pkt,
 		                          3, &full_pkt[0],
                                           1, &full_pkt[3],
                                           6, &full_pkt[4],
@@ -27,7 +27,7 @@ int main(int argc, char *argv[])
 	const uint8_t *o_pl           = nullptr;
 	const uint8_t *o_full_pkt     = nullptr;
 
-	assert(unwrap_message(m,
+	assert(unwrap_message_up(m,
 		    &s_full_pkt_len, &o_full_pkt,
 		    &s_from,         &o_from,
                     &s_to,           &o_to,
