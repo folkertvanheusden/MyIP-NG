@@ -27,6 +27,11 @@ add_executable(shm_test
 	src/tests/shm_test.cpp
 	)
 
+add_executable(addresses_test.cpp
+	src/tests/addresses_test.cpp
+	src/utils/str.cpp
+	)
+
 add_executable(shm_message_test
 	src/tests/shm_message_test.cpp
 	src/utils/net.cpp
