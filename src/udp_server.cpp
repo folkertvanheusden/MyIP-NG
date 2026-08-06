@@ -22,7 +22,29 @@ void sig_handler(int sig)
 	stop_flag = true;
 }
 
-void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> & mappings_in)
+void send_icmp_error(shm_message_queue *const shm, const std::string & icmp_error_name, const int type, const int code, const std::pair<const uint8_t *, size_t> & payload, const addr_ip4 & to, const addr_ip4 & me)
+{
+	uint8_t extra_data[2] { };
+	extra_data[0] = type;
+	extra_data[1] = code;
+
+	auto *wrapped = wrap_message_up(
+			payload.second, payload.first,
+			me.length(), me.get(),
+			to.length(), to.get(),
+			sizeof extra_data, extra_data,
+			{ });
+
+	if (shm->send_message(icmp_error_name, wrapped, false) == false)
+		DOLOG(logger::ll_warning, "Cannot send ICMP message");
+	else
+		DOLOG(logger::ll_warning, "ICMP message type %d code %d queued", type, code);
+
+	free(wrapped);
+}
+
+// ip -> udp
+void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> & mappings_in, const std::string & icmp_error_name)
 {
 	while(!stop_flag) {
 		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
@@ -30,17 +52,19 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			continue;
 
 		// unwrap
-		size_t         from_len = 0;
-		size_t         to_len   = 0;
-		size_t         pl_len   = 0;
-		const uint8_t *from     = nullptr;
-		const uint8_t *to       = nullptr;
-		const uint8_t *pl       = nullptr;
-		if (unwrap_message(m, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
-			DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
-			free(m);
-			continue;
-		}
+                size_t         full_pkt_len = 0;
+                size_t         from_len     = 0;
+                size_t         to_len       = 0;
+                size_t         pl_len       = 0;
+                const uint8_t *full_pkt     = nullptr;
+                const uint8_t *from         = nullptr;
+                const uint8_t *to           = nullptr;
+                const uint8_t *pl           = nullptr;
+                if (unwrap_message_up(m, &full_pkt_len, &full_pkt, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
+                        DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
+                        free(m);
+                        continue;
+                }
 
 		if (pl_len < 8) {
 			free(m);
@@ -54,8 +78,11 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			continue;
 		}
 
+		addr_ip4 a_from(from, from_len);
+		addr_ip4 a_to  (to  , to_len  );
+
 		// check checksum
-		uint16_t checksum = tcp_udp_checksum(addr_ip4(from, from_len), addr_ip4(to, to_len), pl, pl_len, 17);
+		uint16_t checksum = tcp_udp_checksum(a_from, a_to, pl, pl_len, 17);
 		if (checksum != 0x0000) {
 			DOLOG(logger::ll_debug, "UDP packet has incorrect checksum");
 			free(m);
@@ -67,7 +94,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		auto     it               = mappings_in.find(destination_port);
 		if (it == mappings_in.end()) {
 			DOLOG(logger::ll_debug, "No mapping for %d", destination_port);
-			// TODO send ICMP 3, 3
+			send_icmp_error(shm, icmp_error_name, 3, 3, { full_pkt, full_pkt_len }, a_from, a_to);
 			free(m);
 			continue;
 		}
@@ -79,7 +106,8 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		memcpy(m_out, pl, 4);  // copy source & destination port
                 memcpy(&m_out[4], &pl[8], length);
 
-                auto *wrapped = wrap_message(
+                auto *wrapped = wrap_message_up(
+				full_pkt_len,     full_pkt,
                                 from_len,         from,
                                 to_len,           to,
                                 udp_message_size, m_out,
@@ -110,7 +138,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 		const uint8_t *from     = nullptr;
 		const uint8_t *to       = nullptr;
 		const uint8_t *pl       = nullptr;
-		if (unwrap_message(m, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
+		if (unwrap_message_down(m, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
 			DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
 			free(m);
 			continue;
@@ -135,7 +163,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 		udp_packet[6] = checksum >> 8;
 		udp_packet[7] = checksum;
 
-                auto *wrapped = wrap_message(
+                auto *wrapped = wrap_message_down(
                                 from_len,       from,
                                 to_len,         to,
                                 udp_packet_len, udp_packet,
@@ -154,10 +182,11 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 
 void run(shm_message_queue *const shm, const std::string & out_name,
 	 const std::map<uint16_t, std::string> & mappings_in,
-	 shm_message_queue *const shm_upper)
+	 shm_message_queue *const shm_upper,
+	 const std::string & icmp_error_name)
 {
-	std::thread rx([&] { run_in (shm, mappings_in);         });
-	std::thread tx([&] { run_out(shm_upper, out_name, shm); });
+	std::thread rx([&] { run_in (shm, mappings_in, icmp_error_name); });
+	std::thread tx([&] { run_out(shm_upper, out_name, shm);          });
 	tx.join();
 	rx.join();
 }
@@ -224,6 +253,11 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"out-name\" under \"global\" missing\n");
 		return 1;
 	}
+	std::string icmp_error_name = iniparser_getstring(d, "specific:icmp-error-name",  "");
+	if (icmp_error_name.empty()) {
+		fprintf(stderr, "\"icmp-error-name\" under \"specific\" missing\n");
+		return 1;
+	}
 	int msg_queue_size = iniparser_getint(d, "specific:msg-queue-size", 0);
 	if (msg_queue_size == 0) {
 		msg_queue_size = 16384;
@@ -247,7 +281,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	run(&shm, out_name, mappings_in, &shm_upper);
+	run(&shm, out_name, mappings_in, &shm_upper, icmp_error_name);
 
 	return 0;
 }
