@@ -132,8 +132,8 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 			// wrap IP4 to tcp/udp/etc
 			auto *wrapped = wrap_message_up(
 				  ip_size,                pl,
-				  ip4_src.length(),       ip4_src.get(),
-				  ip4_dst.length(),       ip4_dst.get(),
+				  4,                      &pl[12],
+				  4,                     &pl[16],
 				  ip_size - header_size, &pl[header_size],
 				  { });
 

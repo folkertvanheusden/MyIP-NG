@@ -23,6 +23,7 @@ void sig_handler(int sig)
 	stop_flag = true;
 }
 
+// IP -> ICMP
 void run_in(shm_message_queue *const shm, const std::string & out_name)
 {
 	while(!stop_flag) {
@@ -31,17 +32,19 @@ void run_in(shm_message_queue *const shm, const std::string & out_name)
 			continue;
 
 		// unwrap
-		size_t         from_len = 0;
-		size_t         to_len   = 0;
-		size_t         pl_len   = 0;
-		const uint8_t *from     = nullptr;
-		const uint8_t *to       = nullptr;
-		const uint8_t *pl       = nullptr;
-		if (unwrap_message(m, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
-			DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
-			free(m);
-			continue;
-		}
+                size_t         full_pkt_len = 0;
+                size_t         from_len     = 0;
+                size_t         to_len       = 0;
+                size_t         pl_len       = 0;
+                const uint8_t *full_pkt     = nullptr;
+                const uint8_t *from         = nullptr;
+                const uint8_t *to           = nullptr;
+                const uint8_t *pl           = nullptr;
+                if (unwrap_message_up(m, &full_pkt_len, &full_pkt, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
+                        DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
+                        free(m);
+                        continue;
+                }
 
 		if (pl_len < 8) {
 			free(m);
@@ -90,7 +93,7 @@ void run_in(shm_message_queue *const shm, const std::string & out_name)
 			reply[2] = checksum_reply >> 8;
 			reply[3] = checksum_reply;
 
-			auto *wrapped = wrap_message(
+			auto *wrapped = wrap_message_down(
 					to_len,    to,  // this is a reply, that's why they're swapped
 					from_len,  from,
 					reply_len, reply,
@@ -122,7 +125,7 @@ void run_err(shm_message_queue *const shm_err, const std::string & out_name, shm
 		const uint8_t *from     = nullptr;
 		const uint8_t *to       = nullptr;
 		const uint8_t *pl       = nullptr;
-		if (unwrap_message(m_in, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
+		if (unwrap_message_down(m_in, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
 			DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
 			free(m_in);
 			continue;
@@ -151,7 +154,7 @@ void run_err(shm_message_queue *const shm_err, const std::string & out_name, shm
 		m_out[2] = checksum_msg >> 8;
 		m_out[3] = checksum_msg;
 
-		auto *wrapped = wrap_message(
+		auto *wrapped = wrap_message_down(
 				from_len,  from,
 				to_len,    to,
 				icmp_message_size, m_out,

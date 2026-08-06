@@ -319,6 +319,10 @@ void run_in(shm_message_queue *const shm,
 				addr_mac SHA(pl +  8, 6);
 				addr_ip4 SPA(pl + 14, 4);
 
+				DOLOG(logger::ll_debug, "ARP reply received: %s is at %s",
+						SPA.to_str('.', false).c_str(),
+						SHA.to_str(':', true ).c_str());
+
 				{
 					std::unique_lock<std::mutex> lck(arp_cache_lock);
 					arp_cache->insert({ SPA, SHA });
