@@ -36,6 +36,14 @@ void logger::dolog(const logger::loglevel_t ll, const char *const file, const vo
 	auto  now        = std::chrono::system_clock::now();
 	char *log_buffer = nullptr;
 
+	constexpr const char *const ll_str[] {
+			"DBG",
+			"INF",
+			"WRN",
+			"ERR",
+			"FTL"
+	};
+
 	va_list ap;
 	va_start(ap, fmt);
 	int rc = vasprintf(&log_buffer, fmt, ap);
@@ -53,9 +61,9 @@ void logger::dolog(const logger::loglevel_t ll, const char *const file, const vo
 
 	std::ostringstream oss;
 	if (p)
-		oss << now << " " << last_lf << " [" << p << "] [" << function << "] " << log_buffer << std::endl;
+		oss << now << " " << ll_str[ll] << " " << last_lf << " [" << p << "] [" << function << "] " << log_buffer << std::endl;
 	else
-		oss << now << " " << last_lf << " [" << function << "] " << log_buffer << std::endl;
+		oss << now << " " << ll_str[ll] << " " << last_lf << " [" << function << "] " << log_buffer << std::endl;
 	std::string buffer { oss.str() };
 
 	std::ofstream fh(log_file, std::ios::out | std::ios::app);
