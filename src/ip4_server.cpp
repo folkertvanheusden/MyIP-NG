@@ -83,6 +83,7 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 		int header_size = (pl[0] & 15) * 4;
 		int ip_size     = (pl[2] << 8) | pl[3];
 		int protocol    = pl[9];
+		int flags       = pl[6] >> 5;
 
 		auto it = mappings_in.find(protocol);
 
@@ -114,8 +115,18 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 				ip4_dst.to_str('.', false).c_str());
 
 			// TODO fragmentation
+			if (flags & 1) {
+				DOLOG(logger::ll_warning, "Fragmented packet - not handled!");
+				free(m);
+				continue;
+			}
 
-			// TODO check checksum
+			uint16_t checksum = ip_checksum(reinterpret_cast<const uint16_t *>(&pl[0]), header_size / 2);
+			if (checksum != 0x0000) {
+				DOLOG(logger::ll_debug, "IP4 packet has invalid checksum");
+				free(m);
+				continue;
+			}
 
 			// wrap IP4
 			auto *wrapped = wrap_message(
