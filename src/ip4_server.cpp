@@ -217,6 +217,9 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 		}
 	});
 
+	// go through the packets that are queued for send and see
+	// if all data is available now (meaning: the from/to MAC-
+	// addresses)
 	std::thread th_sender([&] {
 		while(!stop_flag) {
 			shm_message_queue::message *resolve_result = shm_resolver_replies->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_reply, { });
@@ -283,6 +286,7 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 					size_t   complete_msg_size = pl_len + 20;
 					uint8_t *complete_msg      = new uint8_t[complete_msg_size]();
 					uint8_t *header            = complete_msg;
+					// IP4 header
 					header[0] = (4 << 4) | 5;
 					header[2] = complete_msg_size >> 8;
 					header[3] = complete_msg_size;
@@ -345,6 +349,7 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 			continue;
 		}
 
+		// start resolve of from/to MAC addresses
 		auto from_msg_nr = start_resolve_by_ip4(shm_resolver_replies, resolver_name, addr_ip4(from, 4));
 
 		uint32_t to_word = (to[0] << 24) | (to[1] << 16) | (to[2] << 8) | to[3];
@@ -356,6 +361,8 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 
 		auto to_msg_nr   = start_resolve_by_ip4(shm_resolver_replies, resolver_name, via);
 
+		// if the resolve-actions-start succeeded, queue the
+		// message for fill-in & send
 		if (from_msg_nr.has_value() && to_msg_nr.has_value())
 		{
 			auto         now = get_us();
