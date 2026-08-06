@@ -92,7 +92,7 @@ bool shm_message_queue::begin()
 
 	get_shm->total_size         = size;
 	get_shm->filled             = 0;
-	get_shm->most_recent_msg_nr = 0;
+//	get_shm->most_recent_msg_nr = 0;
 
 	if (int err = pthread_mutex_unlock(&get_shm->mutex); err != 0)
 		DOLOG(logger::ll_error, "pthread_mutex_unlock failed: %s", strerror(err));
