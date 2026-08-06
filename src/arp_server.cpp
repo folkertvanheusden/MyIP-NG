@@ -25,7 +25,7 @@ void sig_handler(int sig)
 }
 
 struct request {
-	// one must be filled
+	// one must be set
 	std::optional<addr_mac> mac;
 	std::optional<addr_ip4> ip4;
 	std::string searched_by;
@@ -149,10 +149,11 @@ void run_resolver(shm_message_queue *const shm_resolver, std::vector<request> *c
 		TPA.get(&request[tpa_offset]);
 
 		shm_message_queue::message *m_out = wrap_message(
-					SHA.length(),   SHA.get(),
-					sizeof bc_addr, bc_addr,
-                                        sizeof request, request,
-					{ });
+				sizeof request, request,
+				SHA.length(),   SHA.get(),
+				sizeof bc_addr, bc_addr,
+				sizeof request, request,
+				{ });
 		// send request to link layer
 		shm_out->send_message(out_name, m_out, false);
 		free(m_out);
@@ -187,6 +188,7 @@ void register_resolve_reply(shm_message_queue *const shm_resolver,
 	}
 }
 
+// Ethernet -> ARP
 void run_in(shm_message_queue *const shm,
 	    const addr_mac & mappings_in,                               std::mutex & mac_lock,
             const std::set<addr_ip4, decltype(set_cmp)> & mappings_out, std::mutex & ip4_lock,
@@ -217,13 +219,15 @@ void run_in(shm_message_queue *const shm,
 			}
 		}
 
-		size_t         from_len = 0;
-		size_t         to_len   = 0;
-		size_t         pl_len   = 0;
-		const uint8_t *from     = nullptr;
-		const uint8_t *to       = nullptr;
-		const uint8_t *pl       = nullptr;
-		if (unwrap_message(m, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
+		size_t         full_pkt_len = 0;
+		size_t         from_len     = 0;
+		size_t         to_len       = 0;
+		size_t         pl_len       = 0;
+		const uint8_t *full_pkt     = nullptr;
+		const uint8_t *from         = nullptr;
+		const uint8_t *to           = nullptr;
+		const uint8_t *pl           = nullptr;
+		if (unwrap_message(m, &full_pkt_len, &full_pkt, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
 			DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
 			free(m);
 			continue;
@@ -299,8 +303,10 @@ void run_in(shm_message_queue *const shm,
 					DOLOG(logger::ll_debug, "Sending reply with MAC address %s",
 							mappings_in.to_str(':', true).c_str());
 
-					shm_message_queue::message *m_out = wrap_message(sizeof from, from,
-							sizeof to, to,
+					shm_message_queue::message *m_out = wrap_message(
+							sizeof payload_out,  payload_out,
+							sizeof from,         from,
+							sizeof to,           to,
 							sizeof(payload_out), payload_out,
 							temp_msg_nr);
 					shm->send_message(m->sender, m_out, false);
