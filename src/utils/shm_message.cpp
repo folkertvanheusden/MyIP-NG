@@ -84,6 +84,7 @@ bool unwrap_message_up(
 		size_t *const pl_len,       const uint8_t **const pl)
 {
 	const wrapped_up *p = reinterpret_cast<const wrapped_up *>(in.first);
+	assert(p->type == 0xdeadbeef);
 
 	*from_len =  p->from_len;
 	*from     = &p->full_pkt[p->from_offset];
@@ -167,6 +168,7 @@ bool unwrap_message_down(
 		size_t *const pl_len,       const uint8_t **const pl)
 {
 	const wrapped_down *p = reinterpret_cast<const wrapped_down *>(in.first);
+	assert(p->type == 0xbeefdead);
 
 	*from_len =  p->from_len;
 	*from     = &p->data[0];
