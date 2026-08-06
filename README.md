@@ -4,6 +4,15 @@
 * cmake
 * clang++-22
 
+## compile with clang!
+
+```bash
+mkdir build
+cd build
+CXX=clang++-22 cmake ..
+cd ..
+(cd build && make -j4)
+```
 
 ## configuration
 
