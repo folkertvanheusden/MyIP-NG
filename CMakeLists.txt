@@ -27,8 +27,8 @@ add_executable(shm_test
 	src/tests/shm_test.cpp
 	)
 
-add_executable(shm_test2
-	src/tests/shm_test2.cpp
+add_executable(shm_message_test
+	src/tests/shm_message_test.cpp
 	src/utils/net.cpp
 	src/utils/shm_message.cpp
 	)
@@ -96,7 +96,7 @@ target_link_libraries(ip4_server shm log)
 target_link_libraries(ntp_server shm log)
 target_link_libraries(promiscuous_server shm log)
 target_link_libraries(shm_test shm log)
-target_link_libraries(shm_test2 shm log)
+target_link_libraries(shm_message_test shm log)
 target_link_libraries(tap_server shm log)
 target_link_libraries(udp_server shm log)
 
