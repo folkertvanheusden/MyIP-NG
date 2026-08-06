@@ -179,10 +179,11 @@ void run_in(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_ad
 			continue;
 		}
 
-		auto *msg = wrap_message(6, &buffer[6],
-                                         6, &buffer[0],
-                                         size - 14, &buffer[14],
-					 { });  // FIXME handle vlan
+		auto *msg = wrap_message(size, buffer,
+				6,         &buffer[ 6],  // from
+				6,         &buffer[ 0],  // to
+				size - 14, &buffer[14],  // payload
+				{ });  // TODO handle vlan
 
 		if (shm->send_message(it->second, msg, false))
 			DOLOG(logger::ll_debug, "Message pushed to shared memory of \"%s\"", it->second.c_str());
@@ -200,17 +201,29 @@ void run_out(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_a
 		if (!m)
 			continue;
 
-		size_t         from_len = 0;
-		size_t         to_len   = 0;
-		size_t         pl_len   = 0;
-		const uint8_t *from     = nullptr;
-		const uint8_t *to       = nullptr;
-		const uint8_t *pl       = nullptr;
-		if (unwrap_message(m, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
+		size_t         full_pkt_len = 0;
+		size_t         from_len     = 0;
+		size_t         to_len       = 0;
+		size_t         pl_len       = 0;
+		const uint8_t *full_pkt     = nullptr;
+		const uint8_t *from         = nullptr;
+		const uint8_t *to           = nullptr;
+		const uint8_t *pl           = nullptr;
+		if (unwrap_message(m,
+                    &full_pkt_len, &full_pkt,
+                    &from_len,     &from,
+                    &to_len,       &to,
+                    &pl_len,       &pl) == false) {
 			DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
 			free(m);
 			continue;
 		}
+
+                if (full_pkt_len != 0) {
+                        DOLOG(logger::ll_error, "Unexpected full packet!");
+                        free(m);
+                        continue;
+                }
 
 		if (from_len != 6 || to_len != 6) {
 			DOLOG(logger::ll_error, "Unexpected address lengths!");
