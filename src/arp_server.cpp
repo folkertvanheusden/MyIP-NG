@@ -148,8 +148,7 @@ void run_resolver(shm_message_queue *const shm_resolver, std::vector<request> *c
 		THA.get(&request[tha_offset]);  // target = bc_addr
 		TPA.get(&request[tpa_offset]);
 
-		shm_message_queue::message *m_out = wrap_message(
-				sizeof request, request,
+		shm_message_queue::message *m_out = wrap_message_down(
 				SHA.length(),   SHA.get(),
 				sizeof bc_addr, bc_addr,
 				sizeof request, request,
@@ -227,7 +226,7 @@ void run_in(shm_message_queue *const shm,
 		const uint8_t *from         = nullptr;
 		const uint8_t *to           = nullptr;
 		const uint8_t *pl           = nullptr;
-		if (unwrap_message(m, &full_pkt_len, &full_pkt, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
+		if (unwrap_message_up(m, &full_pkt_len, &full_pkt, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
 			DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
 			free(m);
 			continue;
@@ -303,8 +302,7 @@ void run_in(shm_message_queue *const shm,
 					DOLOG(logger::ll_debug, "Sending reply with MAC address %s",
 							mappings_in.to_str(':', true).c_str());
 
-					shm_message_queue::message *m_out = wrap_message(
-							sizeof payload_out,  payload_out,
+					shm_message_queue::message *m_out = wrap_message_down(
 							sizeof from,         from,
 							sizeof to,           to,
 							sizeof(payload_out), payload_out,
