@@ -105,7 +105,10 @@ uint64_t calc_session_id(const uint8_t *const tcp_pl, const addr & from, const a
 	from.get(&session_id_buffer[4]);
 	to  .get(&session_id_buffer[4 + from_len]);
 
-	return fletcher64(session_id_buffer, session_id_buffer_len);
+	auto rc = fletcher64(session_id_buffer, session_id_buffer_len);
+	delete [] session_id_buffer;
+
+	return rc;
 }
 
 uint32_t my_syn_cookie(const uint64_t session_id, const uint8_t syn_cookie_salt[16])
