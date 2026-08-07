@@ -14,12 +14,12 @@ int main(int argc, char *argv[])
 	assert(a1 != a2);
 	assert(a2 == a3);
 
-	std::map<addr, addr, decltype(set_cmp)> m1;
+	std::map<addr, addr, addr> m1;
 	m1.insert({ a1, a1 });
 	assert(m1.find(a0) == m1.end());
 	assert(m1.find(a4) == m1.end());
 
-	std::map<addr, addr, decltype(set_cmp)> m2;
+	std::map<addr, addr, addr> m2;
 	m2.insert({ a0, a0 });
 	m2.insert({ a1, a1 });
 	assert(m2.find(a0) != m2.end());
