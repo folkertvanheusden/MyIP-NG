@@ -28,7 +28,7 @@ uint16_t tcp_udp_checksum(const addr_ip4 & from, const addr_ip4 & to, const uint
 	cksum += htons(to16[0]);
 	cksum += htons(to16[1]);
 	cksum += protocol_number;
-	cksum += n;
+	cksum += n * 2;
 
 	for(size_t i=0; i<n; i++)
 		cksum += htons(reinterpret_cast<const uint16_t *>(p)[i]);

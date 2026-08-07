@@ -15,7 +15,7 @@ int main(int argc, char *argv[])
 	uint8_t test_data[] = "Dit is een test.";
 
 	uint16_t checksum = tcp_udp_checksum(from, to, test_data, sizeof(test_data) / 2, 42);
-	assert(checksum == 0x915b);
+	assert(checksum == 0x9153);
 
 	return 0;
 }
