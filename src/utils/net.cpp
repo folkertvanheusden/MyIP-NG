@@ -16,3 +16,11 @@ void put_uint16(uint8_t to[2], const uint16_t from)
 	to[0] = from >> 8;
 	to[1] = from;
 }
+
+void put_uint32(uint8_t to[4], const uint32_t from)
+{
+	to[0] = from >> 24;
+	to[1] = from >> 16;
+	to[2] = from >>  8;
+	to[3] = from;
+}
