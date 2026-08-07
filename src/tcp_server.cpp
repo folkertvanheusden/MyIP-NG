@@ -37,6 +37,7 @@ struct session_t {
 	uint32_t    local_seq;
 	tcp_state_t tx;
 	uint32_t    peer_seq;
+	std::mutex  lock;
 };
 
 std::atomic_bool stop_flag { false };
@@ -227,8 +228,10 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		{
 			std::unique_lock<std::mutex> lck(sessions_lock);
 			auto it = sessions->find(session_id);
-			if (it != sessions->end())
+			if (it != sessions->end()) {
 				session = it->second;
+				session->lock.lock();
+			}
 		}
 
 		bool invalid = false;
@@ -324,7 +327,10 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 			if (session) {
 				std::unique_lock<std::mutex> lck(sessions_lock);
+				// remove from the map
 				sessions->erase(session_id);
+				// now it can be unlocked and deleted
+				session->lock.unlock();
 				delete session;
 			}
 		}
