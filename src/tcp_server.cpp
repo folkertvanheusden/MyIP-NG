@@ -334,6 +334,10 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				delete session;
 			}
 		}
+		else {
+			if (session)
+				session->lock.unlock();
+		}
 
 		free(m);
 	}
