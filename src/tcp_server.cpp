@@ -233,8 +233,10 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 		bool invalid = false;
 		bool invalid_w_rst = true;
+		bool invalid_inc_ack = false;
 
 		if (flags & FLAG_SYN) {
+			invalid_inc_ack = true;
 			if (session) {
 				DOLOG(logger::ll_debug, "Received SYN for session %" PRIx64 " in ESTABLISHED state -> RST", session_id);
 				invalid = true;
@@ -315,7 +317,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				send_tcp_packet(shm, out_name,
 						a_to, a_from,  // swapped: reply
 						destination_port, source_port,  // swapped: reply
-						0, peer_seq_nr,
+						0, peer_seq_nr + invalid_inc_ack,
 						FLAG_RST, window_size, { nullptr, 0 });
 			}
 
