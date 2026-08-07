@@ -453,7 +453,10 @@ int main(int argc, char *argv[])
 	std::mutex sessions_lock;
 
 	uint8_t syn_cookie_salt[16];  // key size required by SipHAsh
-	getrandom(syn_cookie_salt, sizeof syn_cookie_salt, 0);
+	if (getrandom(syn_cookie_salt, sizeof syn_cookie_salt, 0) == -1) {
+		fprintf(stderr, "getrandom failed: %s\n", strerror(errno));
+		return 1;
+	}
 
 	run(&shm, out_name, mappings_in, &shm_upper, icmp_error_name, &sessions, sessions_lock, syn_cookie_salt);
 
