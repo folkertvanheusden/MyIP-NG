@@ -81,6 +81,14 @@ add_executable(icmp_server
 	src/utils/time.cpp
 	)
 
+add_executable(tcp_server
+	src/3dparty/SipHash/siphash.c
+	src/tcp_server.cpp
+	src/utils/checksum.cpp
+	src/utils/net.cpp
+	src/utils/shm_message.cpp
+	)
+
 add_executable(udp_server
 	src/udp_server.cpp
 	src/utils/checksum.cpp
@@ -103,6 +111,7 @@ target_link_libraries(promiscuous_server shm log)
 target_link_libraries(shm_test shm log)
 target_link_libraries(shm_message_test shm log)
 target_link_libraries(tap_server shm log)
+target_link_libraries(tcp_server shm log)
 target_link_libraries(udp_server shm log)
 
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
@@ -131,6 +140,9 @@ target_compile_options(promiscuous_server PUBLIC ${INI_CFLAGS_OTHER})
 target_link_libraries(tap_server ${INI_LIBRARIES})
 target_include_directories(tap_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(tap_server PUBLIC ${INI_CFLAGS_OTHER})
+target_link_libraries(tcp_server ${INI_LIBRARIES})
+target_include_directories(tcp_server PUBLIC ${INI_INCLUDE_DIRS})
+target_compile_options(tcp_server PUBLIC ${INI_CFLAGS_OTHER})
 target_link_libraries(udp_server ${INI_LIBRARIES})
 target_include_directories(udp_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(udp_server PUBLIC ${INI_CFLAGS_OTHER})
