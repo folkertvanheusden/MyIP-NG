@@ -300,7 +300,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					new_session->rx        = established;
 					new_session->local_seq = syn_cookie;
 					new_session->tx        = established;
-					new_session->peer_seq  = peer_seq_nr + 1;
+					new_session->peer_seq  = peer_seq_nr;
 					std::unique_lock<std::mutex> lck(sessions_lock);
 					sessions->insert({ session_id, new_session });
 				}
