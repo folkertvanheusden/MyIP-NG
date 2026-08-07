@@ -234,9 +234,10 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			}
 		}
 
-		bool invalid = false;
-		bool invalid_w_rst = true;
+		bool invalid         = false;
+		bool invalid_w_rst   = true;
 		bool invalid_inc_ack = false;
+		bool clean_session   = false;
 
 		if (flags & FLAG_SYN) {
 			invalid_inc_ack = true;
@@ -280,9 +281,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 					// TODO handle half closed sessions
 
-					std::unique_lock<std::mutex> lck(sessions_lock);
-					sessions->erase(session_id);
-					delete session;
+					clean_session = true;
 				}
 				else {
 					// TODO
@@ -316,8 +315,8 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 		// TODO
 
-		if (invalid) {
-			if (invalid_w_rst) {
+		if (invalid || clean_session) {
+			if (invalid && invalid_w_rst) {
 				send_tcp_packet(shm, out_name,
 						a_to, a_from,  // swapped: reply
 						destination_port, source_port,  // swapped: reply
