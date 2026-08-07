@@ -68,6 +68,10 @@ struct addr {
 		return *this;
 	}
 
+	bool operator()(const addr & a, const addr & b) const {
+		return memcmp(a.a, b.a, a.a_len) < 0;
+	}
+
 	std::string to_str(const char splitter, const bool hex) const {
 		std::string out;
 		for(size_t i=0; i<a_len; i++) {
@@ -92,8 +96,6 @@ struct addr {
 		return a_len;
 	}
 };
-
-auto set_cmp = [](const addr & a, const addr & b) { return memcmp(a.a, b.a, a.a_len) < 0; };
 
 typedef addr addr_ip4;
 typedef addr addr_mac;
