@@ -33,7 +33,7 @@ uint16_t tcp_udp_checksum(const addr_ip4 & from, const addr_ip4 & to, const uint
 	for(size_t i=0; i<n / 2; i++)
 		cksum += htons(reinterpret_cast<const uint16_t *>(p)[i]);
 	if (n & 1)
-		cksum += htons(p[n - 1]);
+		cksum += p[n - 1] << 8;
 
 	cksum = (cksum >> 16) + (cksum & 0xffff);
 	cksum += cksum >> 16;
