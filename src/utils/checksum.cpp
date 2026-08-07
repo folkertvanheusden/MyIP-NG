@@ -35,7 +35,7 @@ uint16_t tcp_udp_checksum(const addr_ip4 & from, const addr_ip4 & to, const uint
 	cksum = (cksum >> 16) + (cksum & 0xffff);
 	cksum += cksum >> 16;
 
-	free(temp);
+	delete [] temp;
 
         return ~cksum;
 }
@@ -55,7 +55,7 @@ uint64_t fletcher64(const uint8_t *const data, const size_t count)
 	if (extra) {
 		size_t   offset = words * 4;
 		uint32_t temp   = 0;
-		for(int i=0; i<count; i++)
+		for(int i=0; i<extra; i++)
 			temp <<= 8, temp |= data[offset + i];
 
 		sum1 = (sum1 + temp) % UINT32_MAX;
