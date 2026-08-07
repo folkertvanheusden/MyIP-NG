@@ -44,6 +44,12 @@ add_executable(arp_test
 	src/utils/shm_message.cpp
 	)
 
+add_executable(checksum_test
+	src/tests/checksum_tcp_udp_test.cpp
+	src/utils/checksum.cpp
+	src/utils/str.cpp
+	)
+
 add_executable(tap_server
 	src/utils/net.cpp
 	src/utils/shm_message.cpp

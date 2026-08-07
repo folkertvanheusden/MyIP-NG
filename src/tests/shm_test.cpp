@@ -12,6 +12,9 @@ const std::string identifier_b = "5678-test-b";
 
 int main(int argc, char *argv[])
 {
+#if defined(NDEBUG)
+	printf("ASSERT IS DISABLED: NOT A DEBUG BUILD\n");
+#endif
 	constexpr const int queue_size = 16384;
 
 	log_.set_loglevel(logger::ll_fatal);

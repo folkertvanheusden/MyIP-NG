@@ -9,6 +9,9 @@
 
 int main(int argc, char *argv[])
 {
+#if defined(NDEBUG)
+	printf("ASSERT IS DISABLED: NOT A DEBUG BUILD\n");
+#endif
 	if (argc != 4) {
 		fprintf(stderr, "Usage: %s local-name arp-request-name ip-addr\n", argv[0]);
 		return 1;
