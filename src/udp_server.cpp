@@ -82,8 +82,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		addr_ip4 a_to  (to  , to_len  );
 
 		// check checksum
-		assert((pl_len & 1) == 0);
-		uint16_t checksum = tcp_udp_checksum(a_from, a_to, pl, pl_len / 2, 17);
+		uint16_t checksum = tcp_udp_checksum(a_from, a_to, pl, pl_len, 17);
 		if (checksum != 0x0000) {
 			DOLOG(logger::ll_debug, "UDP packet has incorrect checksum");
 			free(m);
@@ -161,7 +160,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 		udp_packet[7] = 0;
 		memcpy(&udp_packet[8], &pl[4], pl_len - 4);  // skip the portnumbers
 		assert((udp_packet_len & 1) == 0);
-		uint16_t checksum = tcp_udp_checksum(addr_ip4(from, from_len), addr_ip4(to, to_len), udp_packet, udp_packet_len / 2, 17);
+		uint16_t checksum = tcp_udp_checksum(addr_ip4(from, from_len), addr_ip4(to, to_len), udp_packet, udp_packet_len, 17);
 		udp_packet[6] = checksum >> 8;
 		udp_packet[7] = checksum;
 
