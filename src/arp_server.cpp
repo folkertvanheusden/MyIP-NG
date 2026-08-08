@@ -444,6 +444,8 @@ int main(int argc, char *argv[])
 		msg_queue_size = 16384;
 		fprintf(stderr, "Using default msg queue size of %d bytes\n", msg_queue_size);
 	}
+	int msg_queue_size_cfg      = iniparser_getint(d, "specific:msg-queue-size-cfg", 512);
+	int msg_queue_size_resolver = iniparser_getint(d, "specific:msg-queue-size-resolver", 2048);
 	std::mutex m_in_lock;
 	addr_mac   mac;
 	std::mutex m_out_lock;
@@ -461,13 +463,13 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	shm_message_queue shm_cfg(cfg_name, msg_queue_size);
+	shm_message_queue shm_cfg(cfg_name, msg_queue_size_cfg);
 	if (shm_cfg.begin() == false) {
 		fprintf(stderr, "Cannot initialize shared memory segment for configuration channel\n");
 		return 1;
 	}
 
-	shm_message_queue shm_resolver(resolver_name, msg_queue_size);
+	shm_message_queue shm_resolver(resolver_name, msg_queue_size_resolver);
 	if (shm_resolver.begin() == false) {
 		fprintf(stderr, "Cannot initialize shared memory segment for resolver channel\n");
 		return 1;

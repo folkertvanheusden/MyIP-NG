@@ -652,6 +652,7 @@ int main(int argc, char *argv[])
 		msg_queue_size = 16384;
 		fprintf(stderr, "Using default msg queue size of %d bytes\n", msg_queue_size);
 	}
+	int msg_queue_size_resolver = iniparser_getint(d, "specific:msg-queue-size-resolver", 2048);
 	std::string listen_addr_str = iniparser_getstring(d, "specific:listen-addr",  "");
 	if (listen_addr_str.empty()) {
 		fprintf(stderr, "\"listen-addr\" under \"specific\" missing\n");
@@ -688,7 +689,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	shm_message_queue shm_resolver_replies(resolver_replies, msg_queue_size);
+	shm_message_queue shm_resolver_replies(resolver_replies, msg_queue_size_resolver);
 	if (shm_resolver_replies.begin() == false) {
 		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", resolver_replies.c_str());
 		return 1;
