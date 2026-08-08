@@ -383,7 +383,6 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 			// fill in missing part
 			std::string resolve_result_str(reinterpret_cast<const char *>(resolve_result->data), resolve_result->size);
 			auto is = resolve_result_str.find("=mac:");
-			// should verify IP4 address
 			if (is == std::string::npos) {
 				DOLOG(logger::ll_error, "Request-record contains invalid answer: \"%s\"", resolve_result_str.c_str());
 				free(resolve_result);
