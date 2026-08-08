@@ -22,6 +22,9 @@
 #include "utils/time.h"
 
 
+constexpr const uint64_t packet_fragmentation_timeout = 5'000'000;  // 5 s
+constexpr const uint64_t arp_timeout                  = 2'500'000;  // 2.5 s
+
 std::atomic_bool stop_flag { false };
 
 void sig_handler(int sig)
@@ -69,6 +72,7 @@ static uint64_t calc_session_id(const addr & from, const addr & to, const uint16
 }
 
 struct packet {
+	uint64_t latest_ts;
 	uint8_t *data;
 	size_t   len;
 	bool     full_size_known;
@@ -101,6 +105,33 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 {
 	std::map<uint64_t, packet> packets;
 	std::mutex packets_lock;
+
+	// cleaner thread
+	std::thread th_cleaner([&] {
+		int sleep_count = 0;
+		while(!stop_flag) {
+			if (++sleep_count <= 10) {
+				usleep(SLEEP_INTERVAL_MS);
+				continue;
+			}
+			sleep_count = 0;
+
+			std::set<uint64_t> erase_keys;
+
+			std::unique_lock<std::mutex> lck(packets_lock);
+			uint64_t now = get_us();
+			for(auto & it: packets) {
+				if (now - it.second.latest_ts >= packet_fragmentation_timeout)
+					erase_keys.insert(it.first);
+			}
+
+			if (erase_keys.empty() == false)
+				DOLOG(logger::ll_debug, "Forgetting %zu ip fragment-records", erase_keys.size());
+
+			for(auto & key: erase_keys)
+				packets.erase(key);
+		}
+	});
 
 	while(!stop_flag) {
 		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
@@ -207,6 +238,8 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 				if ((flags & 1) == 0)
 					it->second.full_size_known = true;
 
+				it->second.latest_ts = get_us();
+
 				if (is_complete(&it->second)) {
 					DOLOG(logger::ll_warning, "Packet with id %x is complete, full size: %zu bytes",
 							frag_session, it->second.len);
@@ -239,6 +272,8 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 
 		free(m);
 	}
+
+	th_cleaner.join();
 }
 
 std::optional<uint64_t> start_resolve_by_ip4(shm_message_queue *const shm_resolver_replies, const std::string & resolver_name, const addr_ip4 & a)
@@ -297,20 +332,20 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 		int sleep_count = 0;
 		while(!stop_flag) {
 			if (++sleep_count < 10) {
-				usleep(100'000);
+				usleep(SLEEP_INTERVAL_MS);
 				continue;
 			}
 			sleep_count = 0;
 
 			std::set<uint64_t> erase_keys;
 
-			uint64_t now = get_us();
 			std::unique_lock<std::mutex> lck(pending_messages_lock);
+			uint64_t now = get_us();
 			for(auto & it: pending_messages) {
 				if (erase_keys.find(it.first) != erase_keys.end())
 					continue;
 
-				if (now - it.second->ts >= 2'500'000) {
+				if (now - it.second->ts >= arp_timeout) {
 					free(it.second->queued_msg);
 					erase_keys.insert(it.second->from_nr);
 					erase_keys.insert(it.second->to_nr  );
