@@ -8,8 +8,10 @@ uint16_t ip_checksum(const uint16_t *const p, const size_t n)
 {
 	uint32_t cksum = 0;
 
-	for(size_t i=0; i<n; i++) 
-		cksum += htons(p[i]);
+        for(size_t i=0; i<n / 2; i++)
+                cksum += htons(p[i]);
+	if (n & 1)
+		cksum += reinterpret_cast<const uint8_t *>(p)[n - 1] << 8;
 
 	cksum = (cksum >> 16) + (cksum & 0xffff);
 	cksum += cksum >> 16;

@@ -10,6 +10,7 @@
 #include <thread>
 #include <vector>
 #include <iniparser/iniparser.h>
+#include <sys/random.h>
 
 #include "utils/addresses.h"
 #include "utils/checksum.h"
@@ -196,7 +197,7 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 				ip4_dst.to_str('.', false).c_str(),
 				it->second.c_str());
 
-			uint16_t checksum = ip_checksum(reinterpret_cast<const uint16_t *>(&pl[0]), header_size / 2);
+			uint16_t checksum = ip_checksum(reinterpret_cast<const uint16_t *>(&pl[0]), header_size);
 			if (checksum != 0x0000) {
 				DOLOG(logger::ll_debug, "IP4 packet has invalid checksum");
 				free(m);
@@ -300,7 +301,8 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 	     const addr_ip4 & default_gw_addr,
              const std::map<std::string, uint8_t> & mappings_out, const std::string & link_name,
 	     shm_message_queue *const shm_resolver_replies, const std::string & resolver_name,
-	     shm_message_queue *const shm_upper_in)
+	     shm_message_queue *const shm_upper_in,
+	     const int mtu_size)
 {
 	struct pending_msg {
 		uint64_t ts;  // when it was placed in the queue, microseconds since epoch
@@ -427,37 +429,56 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 					// goto should be an option here
 				}
 				else {
-					size_t   complete_msg_size = pl_len + 20;
-					uint8_t *complete_msg      = new uint8_t[complete_msg_size]();
-					uint8_t *header            = complete_msg;
-					// IP4 header
-					header[0] = (4 << 4) | 5;
-					header[2] = complete_msg_size >> 8;
-					header[3] = complete_msg_size;
-					header[8] = 63;  // TTL
-					header[9] = protocol;
-					// checksum @ (10, 11)
-					memcpy(&header[12], from, 4);
-					memcpy(&header[16], to,   4);
-					memcpy(&complete_msg[20], pl, pl_len);
+					// & ~7: make sure we stay on a multiple of 8 for the offset
+					uint16_t packets_id = 0;
+					if (getrandom(&packets_id, sizeof packets_id, 0) == -1)
+						DOLOG(logger::ll_error, "getrandom failed for IP packet id!");
+					const int use_mtu_size = mtu_size & ~7;
+					size_t fragment_offset = 0;
+					while(fragment_offset < pl_len) {
+						size_t   current_fragment_size = std::min(size_t(use_mtu_size), pl_len - fragment_offset);
+						printf("%zu %zu: %zu\n", fragment_offset, pl_len, current_fragment_size);
+						size_t   complete_msg_size = current_fragment_size + 20;  // 20 = IP4 header size
+						uint8_t *complete_msg      = new uint8_t[complete_msg_size]();
+						uint8_t *header            = complete_msg;
+						// IP4 header
+						header[0] = (4 << 4) | 5;
+						header[2] = complete_msg_size >> 8;
+						header[3] = complete_msg_size;
+						header[4] = packets_id >> 8;
+						header[5] = packets_id;
+						header[6] = fragment_offset >> (8 + 3);
+						header[7] = fragment_offset >> 3;
+						// if more date coming up, set 'MD' flag
+						header[6] |= (fragment_offset + current_fragment_size < pl_len ? 1 : 0) << 5;
+						header[8] = 63;  // TTL
+						header[9] = protocol;
+						// checksum @ (10, 11)
+						memcpy(&header[12], from, 4);
+						memcpy(&header[16], to,   4);
+						memcpy(&complete_msg[20], &pl[fragment_offset], current_fragment_size);
 
-					uint16_t checksum = ip_checksum(reinterpret_cast<const uint16_t *>(&header[0]), 10);
-					header[10] = checksum >> 8;
-					header[11] = checksum;
+						// 20 = IP4 header size
+						uint16_t checksum = ip_checksum(reinterpret_cast<const uint16_t *>(&header[0]), 20);
+						header[10] = checksum >> 8;
+						header[11] = checksum;
 
-					auto *wrapped = wrap_message_down(
-							pending_msg_meta->from.value().length(), pending_msg_meta->from.value().get(),
-							pending_msg_meta->to  .value().length(), pending_msg_meta->to  .value().get(),
-							complete_msg_size, complete_msg,
-							{ });
+						auto *wrapped = wrap_message_down(
+								pending_msg_meta->from.value().length(), pending_msg_meta->from.value().get(),
+								pending_msg_meta->to  .value().length(), pending_msg_meta->to  .value().get(),
+								complete_msg_size, complete_msg,
+								{ });
 
-					// SEND via shm[link_name] 
-					if (shm->send_message(link_name, wrapped, false) == false)
-						DOLOG(logger::ll_debug, "Failed to place packet in shared memory");
+						// SEND via shm[link_name] 
+						if (shm->send_message(link_name, wrapped, false) == false)
+							DOLOG(logger::ll_debug, "Failed to place packet in shared memory");
 
-					free(wrapped);
+						free(wrapped);
 
-					delete [] complete_msg;
+						delete [] complete_msg;
+
+						fragment_offset += current_fragment_size;
+					}
 				}
 			}
 
@@ -559,10 +580,12 @@ void run(shm_message_queue *const shm, const std::string & announce_ip4_addr, co
          const std::map<std::string, uint8_t> & mappings_out,
 	 const std::string & icmp_error_name, const std::string & link_name,
 	 shm_message_queue *const shm_resolver_replies, const std::string & resolver_name,
-	 shm_message_queue *const upper_in)
+	 shm_message_queue *const upper_in,
+	 const int mtu_size)
 {
 	std::thread rx([&] { run_in (shm, listen_addr, mappings_in,  icmp_error_name); });
-	std::thread tx([&] { run_out(shm, listen_addr, default_gw_addr, mappings_out, link_name, shm_resolver_replies, resolver_name, upper_in); });
+	std::thread tx([&] { run_out(shm, listen_addr, default_gw_addr, mappings_out, link_name,
+				shm_resolver_replies, resolver_name, upper_in, mtu_size); });
         std::thread announce([shm, announce_ip4_addr, listen_addr] { announcer(shm, announce_ip4_addr, listen_addr.first); });
         announce.join();
         tx.join();
@@ -647,6 +670,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"resolver-replies\" under \"specific\" missing\n");
 		return 1;
 	}
+	int mtu_size       = iniparser_getint(d, "specific:ip4-mtu-size", 1500);
 	int msg_queue_size = iniparser_getint(d, "specific:msg-queue-size", 0);
 	if (msg_queue_size == 0) {
 		msg_queue_size = 16384;
@@ -702,7 +726,8 @@ int main(int argc, char *argv[])
 	}
 
 	run(&shm, announce_ip4_addr, { listen_addr, cidr }, default_gw_addr, mappings_in, mappings_out,
-            icmp_error_name, out_name, &shm_resolver_replies, resolver_name, &shm_upper_in);
+            icmp_error_name, out_name, &shm_resolver_replies, resolver_name, &shm_upper_in,
+	    mtu_size);
 
 	return 0;
 }
