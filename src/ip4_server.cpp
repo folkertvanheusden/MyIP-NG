@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <cerrno>
@@ -7,6 +8,7 @@
 #include <mutex>
 #include <set>
 #include <thread>
+#include <vector>
 #include <iniparser/iniparser.h>
 
 #include "utils/addresses.h"
@@ -48,10 +50,58 @@ void send_icmp_error(shm_message_queue *const shm, const std::string & icmp_erro
 	free(wrapped);
 }
 
+static uint64_t calc_session_id(const addr & from, const addr & to, const uint16_t protocol, const uint16_t id)
+{
+        size_t   from_len = from.length();
+
+        size_t   session_id_buffer_len = 2 + 2 + from_len + to.length();
+        uint8_t *session_id_buffer     = new uint8_t[session_id_buffer_len]();
+
+        *reinterpret_cast<uint16_t *>(session_id_buffer + 0) = protocol;
+        *reinterpret_cast<uint16_t *>(session_id_buffer + 2) = id;
+        from.get(&session_id_buffer[4]);
+        to  .get(&session_id_buffer[4 + from_len]);
+
+        auto rc = fletcher64(session_id_buffer, session_id_buffer_len);
+        delete [] session_id_buffer;
+
+        return rc;
+}
+
+struct packet {
+	uint8_t *data;
+	size_t   len;
+	bool     full_size_known;
+	std::vector<std::pair<uint16_t, uint16_t> > fragments;
+};
+
+bool is_complete(packet *const p)
+{
+	if (p->full_size_known == false)
+		return false;
+
+	std::sort(p->fragments.begin(), p->fragments.end(),
+		[](const auto & a, const auto & b) {
+			return a.first < b.first;
+		});
+
+	uint16_t prev_end = 0;
+	for(auto & fragment: p->fragments) {
+		if (fragment.first != prev_end)  // this will "fail" for duplicate packets
+			return false;
+		prev_end = fragment.first + fragment.second;
+	}
+
+	return true;
+}
+
 // Ethernet -> IP4
 void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & listen_addr,
             const std::map<uint8_t, std::string> & mappings_in, const std::string & icmp_error_name)
 {
+	std::map<uint64_t, packet> packets;
+	std::mutex packets_lock;
+
 	while(!stop_flag) {
 		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
 		if (!m)
@@ -115,13 +165,6 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 				ip4_dst.to_str('.', false).c_str(),
 				it->second.c_str());
 
-			// TODO fragmentation
-			if (flags & 1) {
-				DOLOG(logger::ll_warning, "Fragmented packet - not handled!");
-				free(m);
-				continue;
-			}
-
 			uint16_t checksum = ip_checksum(reinterpret_cast<const uint16_t *>(&pl[0]), header_size / 2);
 			if (checksum != 0x0000) {
 				DOLOG(logger::ll_debug, "IP4 packet has invalid checksum");
@@ -129,18 +172,69 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 				continue;
 			}
 
-			// wrap IP4 to tcp/udp/etc
-			auto *wrapped = wrap_message_up(
-				  ip_size,                pl,
-				  4,                      &pl[12],
-				  4,                     &pl[16],
-				  ip_size - header_size, &pl[header_size],
-				  { });
+			shm_message_queue::message *wrapped = nullptr;
 
-			if (shm->send_message(it->second, wrapped, false) == false)
-				DOLOG(logger::ll_warning, "Cannot send to %s", it->second.c_str());
+			size_t   pl_without_header_len = ip_size - header_size;
 
-			free(wrapped);
+			uint16_t id     = (pl[4] << 8) | pl[5];
+
+			uint16_t offset = (((pl[6] & 31) << 8) | pl[7]) * 8;
+			// fragment?
+			if (offset > 0 || (flags & 1)) {
+				uint64_t frag_session = calc_session_id(ip4_src, ip4_dst, protocol, id);
+				DOLOG(logger::ll_warning, "Fragmented packet, id: %x", frag_session);
+
+				// store in fragment-store
+				std::unique_lock<std::mutex> lck(packets_lock);
+				auto it = packets.find(frag_session);
+				if (it == packets.end()) {
+					packet p;
+					p.data            = nullptr;
+					p.len             = 0;
+					p.full_size_known = false;
+					it = packets.insert({ frag_session, p }).first;
+				}
+
+				size_t current_fragment_end = offset + pl_without_header_len;
+				if (current_fragment_end > it->second.len) {
+					it->second.data = reinterpret_cast<uint8_t *>(realloc(it->second.data, current_fragment_end));
+					it->second.len  = current_fragment_end;
+				}
+				memcpy(&it->second.data[offset], &pl[header_size], pl_without_header_len);
+				// keep track of what segments arrived to be able to see if everything arrived
+				it->second.fragments.push_back({ offset, pl_without_header_len });
+
+				if ((flags & 1) == 0)
+					it->second.full_size_known = true;
+
+				if (is_complete(&it->second)) {
+					DOLOG(logger::ll_warning, "Packet with id %x is complete, full size: %zu bytes",
+							frag_session, it->second.len);
+					wrapped = wrap_message_up(
+						ip_size,        pl,  // use the re-assembled here?
+						4,             &pl[12],
+						4,             &pl[16],
+						it->second.len, it->second.data,
+						{ });
+
+					packets.erase(it);
+				}
+			}
+			else {
+				wrapped = wrap_message_up(
+						ip_size,                pl,
+						4,                     &pl[12],
+						4,                     &pl[16],
+						pl_without_header_len, &pl[header_size],
+						{ });
+			}
+
+			if (wrapped) {
+				if (shm->send_message(it->second, wrapped, false) == false)
+					DOLOG(logger::ll_warning, "Cannot send to %s", it->second.c_str());
+
+				free(wrapped);
+			}
 		}
 
 		free(m);
