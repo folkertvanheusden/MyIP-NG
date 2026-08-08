@@ -197,7 +197,7 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 				ip4_dst.to_str('.', false).c_str(),
 				it->second.c_str());
 
-			uint16_t checksum = ip_checksum(reinterpret_cast<const uint16_t *>(&pl[0]), header_size / 2);
+			uint16_t checksum = ip_checksum(reinterpret_cast<const uint16_t *>(&pl[0]), header_size);
 			if (checksum != 0x0000) {
 				DOLOG(logger::ll_debug, "IP4 packet has invalid checksum");
 				free(m);
@@ -458,8 +458,8 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 						memcpy(&header[16], to,   4);
 						memcpy(&complete_msg[20], &pl[fragment_offset], current_fragment_size);
 
-						// 10 = half of 20, the IP4 header size
-						uint16_t checksum = ip_checksum(reinterpret_cast<const uint16_t *>(&header[0]), 10);
+						// 20 = IP4 header size
+						uint16_t checksum = ip_checksum(reinterpret_cast<const uint16_t *>(&header[0]), 20);
 						header[10] = checksum >> 8;
 						header[11] = checksum;
 

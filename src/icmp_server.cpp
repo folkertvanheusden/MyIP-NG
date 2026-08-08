@@ -55,7 +55,7 @@ void run_in(shm_message_queue *const shm, const std::string & out_name)
 		int code = pl[1];
 
 		// check checksum
-		uint16_t checksum = ip_checksum(reinterpret_cast<const uint16_t *>(pl), pl_len / 2);
+		uint16_t checksum = ip_checksum(reinterpret_cast<const uint16_t *>(pl), pl_len);
 		if (checksum != 0x0000) {
 			DOLOG(logger::ll_debug, "ICMP packet has incorrect checksum");
 			free(m);
@@ -89,7 +89,7 @@ void run_in(shm_message_queue *const shm, const std::string & out_name)
 
 			reply[2] = 0;
 			reply[3] = 0;
-			uint16_t checksum_reply = ip_checksum(reinterpret_cast<const uint16_t *>(reply), reply_len / 2);
+			uint16_t checksum_reply = ip_checksum(reinterpret_cast<const uint16_t *>(reply), reply_len);
 			reply[2] = checksum_reply >> 8;
 			reply[3] = checksum_reply;
 
@@ -152,7 +152,7 @@ void run_err(shm_message_queue *const shm_err, const std::string & out_name, shm
 		m_out[1] = code;
 		memcpy(&m_out[8], &full_pkt[0], copy_n);
 
-		uint16_t checksum_msg = ip_checksum(reinterpret_cast<const uint16_t *>(m_out), icmp_message_size / 2);
+		uint16_t checksum_msg = ip_checksum(reinterpret_cast<const uint16_t *>(m_out), icmp_message_size);
 		m_out[2] = checksum_msg >> 8;
 		m_out[3] = checksum_msg;
 
