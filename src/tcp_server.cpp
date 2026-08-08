@@ -95,7 +95,7 @@ void send_icmp_error(shm_message_queue *const shm, const std::string & icmp_erro
 	free(wrapped);
 }
 
-uint64_t calc_session_id(const uint8_t *const tcp_pl, const addr & from, const addr & to)
+static uint64_t calc_session_id(const uint8_t *const tcp_pl, const addr & from, const addr & to)
 {
 	size_t   from_len = from.length();
 
