@@ -43,7 +43,7 @@ void send_icmp_error(shm_message_queue *const shm, const std::string & icmp_erro
 	if (shm->send_message(icmp_error_name, wrapped, false) == false)
 		DOLOG(logger::ll_warning, "Cannot send ICMP message");
 	else
-		DOLOG(logger::ll_warning, "ICMP message type %d code %d queued", type, code);
+		DOLOG(logger::ll_debug, "ICMP message type %d code %d queued", type, code);
 
 	free(wrapped);
 }
