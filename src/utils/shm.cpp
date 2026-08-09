@@ -278,5 +278,7 @@ bool shm_message_queue::send_message(const std::string & remote_identifier, mess
 
 shm_message_queue::message *allocate_shm_message(const size_t size)
 {
-	return reinterpret_cast<shm_message_queue::message *>(calloc(1, sizeof(shm_message_queue::message) + size));
+	auto out = reinterpret_cast<shm_message_queue::message *>(calloc(1, sizeof(shm_message_queue::message) + size));
+	out->size = size;
+	return out;
 }
