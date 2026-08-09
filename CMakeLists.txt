@@ -93,6 +93,7 @@ add_executable(tcp_server
 	src/utils/checksum.cpp
 	src/utils/net.cpp
 	src/utils/shm_message.cpp
+	src/utils/str.cpp
 	)
 
 add_executable(udp_server

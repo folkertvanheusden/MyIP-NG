@@ -38,6 +38,11 @@ struct session_t {
 	uint32_t    local_seq;
 	uint32_t    peer_seq;
 	std::mutex  lock;
+
+	addr        local_addr;
+	uint16_t    local_port;
+	addr        peer_addr;
+	uint16_t    peer_port;
 };
 
 std::atomic_bool stop_flag { false };
@@ -95,14 +100,15 @@ void send_icmp_error(shm_message_queue *const shm, const std::string & icmp_erro
 	free(wrapped);
 }
 
-static uint64_t calc_session_id(const uint8_t *const tcp_pl, const addr & from, const addr & to)
+static uint64_t calc_session_id(const uint16_t src_port, const uint16_t dst_port, const addr & from, const addr & to)
 {
 	size_t   from_len = from.length();
 
 	size_t   session_id_buffer_len = 2 + 2 + from_len + to.length();
 	uint8_t *session_id_buffer     = new uint8_t[session_id_buffer_len]();
 
-	memcpy(session_id_buffer, tcp_pl, 4);  // source & destination ports
+	*reinterpret_cast<uint16_t *>(&session_id_buffer[0]) = src_port;
+	*reinterpret_cast<uint16_t *>(&session_id_buffer[2]) = dst_port;
 	from.get(&session_id_buffer[4]);
 	to  .get(&session_id_buffer[4 + from_len]);
 
@@ -127,7 +133,7 @@ uint32_t my_syn_cookie(const uint64_t session_id, const uint8_t syn_cookie_salt[
 	return (s & 0xFFFFFFE0) | t;
 }
 
-void send_tcp_packet(shm_message_queue *const shm, const std::string & down,
+bool send_tcp_packet(shm_message_queue *const shm, const std::string & down,
 		const addr & from, const addr & to,
 		const int src_port, const int dst_port, const uint32_t seq_nr, const uint32_t ack_nr,
 		const int flags, const int window_size, const std::pair<const uint8_t *, size_t> & payload)
@@ -154,12 +160,15 @@ void send_tcp_packet(shm_message_queue *const shm, const std::string & down,
 			packet_length, packet,
 			{ });
 
-	if (shm->send_message(down, wrapped, false) == false)
+	bool rc = shm->send_message(down, wrapped, false);
+	if (rc == false)
 		DOLOG(logger::ll_warning, "Cannot send to %s", down.c_str());
 
 	free(wrapped);
 
 	delete [] packet;
+
+	return rc;
 }
 
 // ip -> tcp
@@ -207,7 +216,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 		uint16_t source_port      = get_uint16(&pl[0]);
 		uint16_t destination_port = get_uint16(&pl[2]);
-		uint64_t session_id       = calc_session_id(pl, a_from, a_to);
+		uint64_t session_id       = calc_session_id(source_port, destination_port, a_from, a_to);
 		int      header_size      = (pl[12] >> 4) * 4;  // or >> 2
 		int      flags            =  pl[13];
 		int      window_size      = get_uint16(&pl[14]);
@@ -317,10 +326,14 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				else {
 					// allocate session
 					session_t *new_session = new session_t;
-					new_session->is_client = false;
-					new_session->state     = established;
-					new_session->local_seq = syn_cookie;
-					new_session->peer_seq  = peer_seq_nr;
+					new_session->is_client  = false;
+					new_session->state      = established;
+					new_session->local_seq  = syn_cookie;
+					new_session->local_addr = a_to;
+					new_session->local_port = destination_port;
+					new_session->peer_seq   = peer_seq_nr;
+					new_session->peer_addr  = a_from;
+					new_session->peer_port  = source_port;
 					std::unique_lock<std::mutex> lck(sessions_lock);
 					sessions->insert({ session_id, new_session });
 				}
@@ -366,7 +379,178 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 		if (!m)
 			continue;
 
+		// unwrap
+		size_t         from_len = 0;
+		size_t         to_len   = 0;
+		size_t         pl_len   = 0;
+		const uint8_t *from     = nullptr;
+		const uint8_t *to       = nullptr;
+		const uint8_t *pl       = nullptr;
+		if (unwrap_message_down(m, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
+			DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
+			free(m);
+			continue;
+		}
+
+		addr_ip4 a_from(from, from_len);
+		addr_ip4 a_to  (to,   to_len);
+
+		// hoe te zien dat het een nieuwe sessie is? from_port = 0? maar hoe dan de ge-alloceerde port terug te communiceren?
+		// dus misschien een k/v systeem dat eerst handshaked en daarna een session_id teruggeeft (soort socket handle)
+		// de client weet dan niet z'n source-port -> dus dit naar de kv en hier altijd de session_id uit de pl plukken
+
 		// TODO
+
+		free(m);
+	}
+}
+
+void run_meta(shm_message_queue *const shm, const std::string & out_name,
+	      const addr & from_addr,
+	      shm_message_queue *const shm_meta,
+	      std::map<uint64_t, session_t *> *const sessions, std::mutex & sessions_lock)
+{
+	// map of local port and session-id
+	// should also include addr in key
+	std::map<uint16_t, uint64_t> local_allocated_ports;
+
+	while(!stop_flag) {
+		shm_message_queue::message *m = shm_meta->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
+		if (!m)
+			continue;
+
+		std::string kv(reinterpret_cast<const char *>(m->data), m->size);
+		auto lines = split(kv, "\n");
+		if (lines.size() < 2) {
+			DOLOG(logger::ll_error, "TCP meta message missing data");
+			free(m);
+			continue;
+		}
+
+		enum { open, close } action = close;
+		std::optional<uint64_t> session_id;
+		std::optional<addr>     dst_addr;
+		std::optional<uint16_t> dst_port;
+
+		bool invalid = false;
+		for(auto & line: lines) {
+			DOLOG(logger::ll_debug, "Received cfg item: \"%s\" from %s", line.c_str(), m->sender);
+			auto parts = split(line, "=");
+			if (parts.size() != 2) {
+				DOLOG(logger::ll_error, "TCP meta message line invalid (missing either value or key: \"%s\")", line.c_str());
+				invalid = true;
+				break;
+			}
+
+			if (parts[0] == "action") {
+				if (parts[1] == "open")
+					action = open;
+				else if (parts[1] == "close")
+					action = close;
+				else {
+					DOLOG(logger::ll_error, "TCP meta: invalid action \"%s\"", parts[1].c_str());
+					invalid = true;
+					break;
+				}
+			}
+			else if (parts[0] == "session-id") {
+				session_id = std::stoi(parts[1], nullptr, 16);  // TODO capture exceptions
+			}
+			else if (parts[0] == "dst-port") {
+				dst_port = std::stoi(parts[1]);  // TODO capture exceptions
+			}
+			else if (parts[0] == "dst-addr-ip4") {
+				dst_addr = addr(parts[1], ".", false);
+			}
+			else {
+				DOLOG(logger::ll_error, "TCP meta: invalid key \"%s\"", line.c_str());
+				invalid = true;
+				break;
+			}
+		}
+		if (invalid) {
+			free(m);
+			continue;
+		}
+
+		if (action == open) {
+			if (dst_port.has_value() && dst_addr.has_value()) {
+				bool     failed   = false;
+				uint16_t src_port = 0;
+				do {
+					if (getrandom(&src_port, sizeof src_port, 0) == -1) {
+						failed = true;
+						DOLOG(logger::ll_error, "getrandom failed");
+						break;
+					}
+				}
+				while(local_allocated_ports.find(src_port) != local_allocated_ports.end());
+
+				if (failed == false) {
+					uint64_t session_id = calc_session_id(src_port, dst_port.value(), from_addr, dst_addr.value());
+					session_t *new_session = new session_t;
+					new_session->is_client = true;
+					new_session->state     = syn_sent;
+					new_session->local_seq = 0;
+					new_session->peer_seq  = 0;
+
+					// send SYN
+					failed = !send_tcp_packet(shm, out_name,
+							from_addr, dst_addr.value(),
+							src_port, dst_port.value(),
+							0, 0,
+							FLAG_SYN, 128 /* TODO */, { nullptr, 0 });
+
+					// return new session_id
+					if (!failed) {
+						const std::string reply = std::format("session-id={0:x}", session_id);
+						shm_message_queue::message *m_rc = allocate_shm_message(reply.size());
+						m_rc->type = shm_message_queue::msg_reply;
+						memcpy(m_rc->data, reply.c_str(), m_rc->size);
+						failed = !shm_meta->send_message(m->sender, m_rc, false);
+						free(m_rc);
+					}
+
+					// if all went well:
+					if (failed)
+						delete new_session;
+					else {
+						std::unique_lock<std::mutex> lck(sessions_lock);
+						sessions->insert({ session_id, new_session });
+					}
+				}
+			}
+			else {
+				DOLOG(logger::ll_error, "TCP meta: open-action missing either dst-port or dst-addr");
+			}
+		}
+		else if (action == close) {
+			if (session_id.has_value()) {
+				// send FIN, close session
+				std::unique_lock<std::mutex> lck(sessions_lock);
+				auto it = sessions->find(session_id.value());
+				if (it != sessions->end()) {
+					auto session = it->second;
+					session->local_seq++;
+
+					send_tcp_packet(shm, out_name,
+							session->local_addr, session->peer_addr,
+							session->local_port, session->peer_port,
+							session->local_seq,  session->peer_seq + 1,
+							FLAG_FIN, 128 /* TODO */, { nullptr, 0 });
+					sessions->erase(it);
+				}
+				else {
+					DOLOG(logger::ll_warning, "TCP meta: session %x not in map", session_id);
+				}
+			}
+			else {
+				DOLOG(logger::ll_error, "TCP meta: close-action missing session-id");
+			}
+		}
+		else {
+			DOLOG(logger::ll_error, "TCP meta: internal error");
+		}
 
 		free(m);
 	}
@@ -377,12 +561,15 @@ void run(shm_message_queue *const shm, const std::string & out_name,
 	 shm_message_queue *const shm_upper,
 	 const std::string & icmp_error_name,
 	 std::map<uint64_t, session_t *> *const sessions, std::mutex & sessions_lock,
-	 const uint8_t syn_cookie_salt[16])
+	 const uint8_t syn_cookie_salt[16],
+	 shm_message_queue *const shm_meta, const addr & local_addr)
 {
-	std::thread rx([&] { run_in (shm, mappings_in, icmp_error_name, out_name, sessions, sessions_lock, syn_cookie_salt); });
-	std::thread tx([&] { run_out(shm_upper, out_name, shm); });
-	tx.join();
-	rx.join();
+	std::thread rx  ([&] { run_in  (shm, mappings_in, icmp_error_name, out_name, sessions, sessions_lock, syn_cookie_salt); });
+	std::thread tx  ([&] { run_out (shm_upper, out_name, shm); });
+	std::thread meta([&] { run_meta(shm, out_name, local_addr, shm_meta, sessions, sessions_lock); });
+	meta.join();
+	tx  .join();
+	rx  .join();
 }
 
 void load_mappings(std::map<uint16_t, std::string> *const mappings_in, const dictionary *const d)
@@ -442,6 +629,11 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"name-upper\" under \"global\" missing\n");
 		return 1;
 	}
+	std::string name_meta = iniparser_getstring(d, "global:name-meta",  "");
+	if (name_meta.empty()) {
+		fprintf(stderr, "\"name-meta\" under \"global\" missing\n");
+		return 1;
+	}
 	std::string out_name = iniparser_getstring(d, "global:out-name",  "");
 	if (out_name.empty()) {
 		fprintf(stderr, "\"out-name\" under \"global\" missing\n");
@@ -452,6 +644,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"icmp-error-name\" under \"specific\" missing\n");
 		return 1;
 	}
+	int msg_queue_size_meta = iniparser_getint(d, "specific:meta-queue-size", 512);
 	int msg_queue_size = iniparser_getint(d, "specific:msg-queue-size", 0);
 	if (msg_queue_size == 0) {
 		msg_queue_size = 16384;
@@ -474,7 +667,19 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", name_upper.c_str());
 		return 1;
 	}
-	
+
+	shm_message_queue shm_meta(name_meta, msg_queue_size_meta);
+	if (shm_meta.begin() == false) {
+		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", name_meta.c_str());
+		return 1;
+	}
+	std::string send_addr_str = iniparser_getstring(d, "specific:send-addr",  "");
+	if (send_addr_str.empty()) {
+		fprintf(stderr, "\"send-addr\" under \"specific\" missing\n");
+		return 1;
+	}
+	addr_ip4 send_addr(send_addr_str, ".", false);
+
 	std::map<uint64_t, session_t *> sessions;
 	std::mutex sessions_lock;
 
@@ -484,7 +689,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	run(&shm, out_name, mappings_in, &shm_upper, icmp_error_name, &sessions, sessions_lock, syn_cookie_salt);
+	run(&shm, out_name, mappings_in, &shm_upper, icmp_error_name, &sessions, sessions_lock, syn_cookie_salt, &shm_meta, send_addr);
 
 	return 0;
 }
