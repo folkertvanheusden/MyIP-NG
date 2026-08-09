@@ -266,7 +266,6 @@ void announcer(shm_message_queue *const shm, const uint8_t mac_addr[6], const st
 				mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
 	shm_message_queue::message *m = allocate_shm_message(msg.size());
 	m->type = shm_message_queue::msg_new;
-	m->size = msg.size();
 	memcpy(m->data, msg.c_str(), m->size);
 
 	int i = 0;
