@@ -317,8 +317,6 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	DOLOG(logger::ll_info, "TAP server starting...");
-
 	dictionary *d = iniparser_load(cfg_file.c_str());
 	for(int i=0; i<iniparser_getnsec(d); i++) {
 		std::string section_name = iniparser_getsecname(d, i);
@@ -357,6 +355,11 @@ int main(int argc, char *argv[])
                 fprintf(stderr, "\"run-as\" not set (in \"global\")\n");
                 return 1;
         }
+        int run_group_as = iniparser_getint(d, "global:run-group-as", -1);
+        if (run_group_as == -1) {
+                fprintf(stderr, "\"run-group-as\" not set (in \"global\")\n");
+                return 1;
+        }
 	std::map<uint16_t, std::string> mappings_in;
 	std::map<std::string, uint16_t> mappings_out;
 	load_mappings(&mappings_in, &mappings_out, d);
@@ -365,14 +368,25 @@ int main(int argc, char *argv[])
 	signal(SIGINT, sig_handler);
 
 	int               tap_fd = open_tap(device_name, mtu_size);
+	if (tap_fd == -1) {
+		fprintf(stderr, "Failed to initialize Ethernet device \"%s\"\n", device_name.c_str());
+		return 1;
+	}
 	uint8_t           mac_addr[6] { };
 	get_local_mac(device_name, mac_addr);
 	set_mtu_size (device_name, mtu_size);
+
+	if (setgid(run_group_as) == -1) {
+		fprintf(stderr, "Cannot change group to %d: %s\n", run_group_as, strerror(errno));
+		return 1;
+	}
 
 	if (setuid(run_as) == -1) {
 		fprintf(stderr, "Cannot change user to %d: %s\n", run_as, strerror(errno));
 		return 1;
 	}
+
+	DOLOG(logger::ll_info, "TAP server starting...");
 
 	shm_message_queue shm(name, msg_queue_size);
 	if (shm.begin() == false) {
