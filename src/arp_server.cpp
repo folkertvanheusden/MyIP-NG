@@ -202,7 +202,7 @@ void run_in(shm_message_queue *const shm,
 		{
 			std::unique_lock<std::mutex> lck(ip4_lock);
 			if (mappings_out.empty()) {
-				DOLOG(logger::ll_error, "No IP4 addresses known yet, dropping packet");
+				DOLOG(logger::ll_info, "No IP4 addresses known yet, dropping packet");
 				free(m);
 				continue;
 			}
@@ -211,7 +211,7 @@ void run_in(shm_message_queue *const shm,
 		{
 			std::unique_lock<std::mutex> lck(mac_lock);
 			if (mappings_in.a_len == 0) {
-				DOLOG(logger::ll_error, "No MAC address known yet, dropping packet");
+				DOLOG(logger::ll_info, "No MAC address known yet, dropping packet");
 				free(m);
 				continue;
 			}

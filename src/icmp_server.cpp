@@ -65,7 +65,7 @@ void run_in(shm_message_queue *const shm, const std::string & out_name)
 		if (type == 8 && code == 0) {  // echo request
 			addr_ip4 from_ip4(from, from_len);
 
-			std::string age_str;
+			std::string age_str = " (no timestamp)";
 			if (pl_len >= 24) {  // may include timestamp
 				timeval tv { };
 				memcpy(&tv, &pl[8], sizeof tv);
@@ -73,7 +73,7 @@ void run_in(shm_message_queue *const shm, const std::string & out_name)
 				uint64_t now_local = get_us();
 
 				if (labs(tv.tv_sec - now_local / 1'000'000) < 3) {
-					uint64_t age = now_local - (tv.tv_sec * 1'000'000 + tv.tv_usec);
+					int64_t age = now_local - (tv.tv_sec * 1'000'000 + tv.tv_usec);
 					age_str += " (sent " + std::to_string(age) + " µs ago)";
 				}
 			}
