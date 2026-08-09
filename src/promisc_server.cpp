@@ -194,9 +194,11 @@ void run_out(shm_message_queue *const shm, const prom_handle & ph, const std::ma
 		if (!m)
 			continue;
 
+		size_t         full_pkt_len = 0;
 		size_t         from_len     = 0;
 		size_t         to_len       = 0;
 		size_t         pl_len       = 0;
+		const uint8_t *full_pkt     = nullptr;
 		const uint8_t *from         = nullptr;
 		const uint8_t *to           = nullptr;
 		const uint8_t *pl           = nullptr;
@@ -209,11 +211,11 @@ void run_out(shm_message_queue *const shm, const prom_handle & ph, const std::ma
 			continue;
 		}
 
-		if (pl_len != 0) {
-			DOLOG(logger::ll_error, "Unexpected full packet!");
-			free(m);
-			continue;
-		}
+                if (full_pkt_len != 0) {
+                        DOLOG(logger::ll_error, "Unexpected full packet!");
+                        free(m);
+                        continue;
+                }
 
 		if (from_len != 6 || to_len != 6) {
 			DOLOG(logger::ll_error, "Unexpected address lengths!");
