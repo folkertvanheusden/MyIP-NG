@@ -33,9 +33,9 @@ extern "C" {
 enum tcp_state_t { listen, syn_sent, syn_received, established, fin_wait_1, fin_wait_2, close_wait, closing, last_ack, time_wait, closed };
 
 struct session_t {
-	tcp_state_t rx;
+	bool        is_client;
+	tcp_state_t state;
 	uint32_t    local_seq;
-	tcp_state_t tx;
 	uint32_t    peer_seq;
 	std::mutex  lock;
 };
@@ -241,9 +241,26 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 		if (flags & FLAG_SYN) {
 			invalid_inc_ack = true;
+			// either a SYN/ACK for a server or a client (client sessions
+			// always start with a session allocated)
 			if (session) {
-				DOLOG(logger::ll_debug, "Received SYN for session %" PRIx64 " in ESTABLISHED state -> RST", session_id);
-				invalid = true;
+				if (session->is_client) {  // client? then this should be SYN/ACK
+					if ((flags & FLAG_ACK) == 0) {
+						DOLOG(logger::ll_debug, "Received SYN for session %" PRIx64 " (client)", session_id);
+						invalid = true;
+					}
+					else if (session->state == established) {
+						DOLOG(logger::ll_debug, "Received SYN/ACK for session %" PRIx64 " (client, established state)", session_id);
+						invalid = true;
+					}
+					else {
+						session->state = established;
+					}
+				}
+				else {
+					DOLOG(logger::ll_debug, "Received SYN for session %" PRIx64 " in ESTABLISHED state -> RST", session_id);
+					invalid = true;
+				}
 			}
 			else {  // new session
 				auto it = mappings_in.find(destination_port);
@@ -300,9 +317,9 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				else {
 					// allocate session
 					session_t *new_session = new session_t;
-					new_session->rx        = established;
+					new_session->is_client = false;
+					new_session->state     = established;
 					new_session->local_seq = syn_cookie;
-					new_session->tx        = established;
 					new_session->peer_seq  = peer_seq_nr;
 					std::unique_lock<std::mutex> lck(sessions_lock);
 					sessions->insert({ session_id, new_session });
