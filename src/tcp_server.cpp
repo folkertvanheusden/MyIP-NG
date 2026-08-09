@@ -515,6 +515,8 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 					if (failed)
 						delete new_session;
 					else {
+						local_allocated_ports.insert({ src_port, session_id });
+
 						std::unique_lock<std::mutex> lck(sessions_lock);
 						sessions->insert({ session_id, new_session });
 					}
@@ -532,6 +534,12 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 				if (it != sessions->end()) {
 					auto session = it->second;
 					session->local_seq++;
+
+					auto ports_it = local_allocated_ports.find(session->local_port);
+					if (ports_it->second == session_id)
+						local_allocated_ports.erase(ports_it);
+					else
+						DOLOG(logger::ll_error, "TCP meta: local port %u is mapped to an other session %x, not %x", ports_it->second, session_id);
 
 					send_tcp_packet(shm, out_name,
 							session->local_addr, session->peer_addr,
