@@ -214,7 +214,7 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 			// fragment?
 			if (offset > 0 || (flags & 1)) {
 				uint64_t frag_session = calc_session_id(ip4_src, ip4_dst, protocol, id);
-				DOLOG(logger::ll_warning, "Fragmented packet, id: %x", frag_session);
+				DOLOG(logger::ll_debug, "Fragmented packet, id: %x", frag_session);
 
 				// store in fragment-store
 				std::unique_lock<std::mutex> lck(packets_lock);
