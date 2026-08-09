@@ -283,7 +283,6 @@ std::optional<uint64_t> start_resolve_by_ip4(shm_message_queue *const shm_resolv
 
 	shm_message_queue::message *res_req_msg = allocate_shm_message(msg.size());
 	res_req_msg->type = shm_message_queue::msg_new;
-	res_req_msg->size = msg.size();
 	memcpy(res_req_msg->data, msg.c_str(), msg.size());
 	if (shm_resolver_replies->send_message(resolver_name, res_req_msg, false)) {
 		uint64_t msg_nr = res_req_msg->msg_nr;
@@ -554,7 +553,6 @@ void announcer(shm_message_queue *const shm, const std::string & announce_ip4_ad
 	const std::string msg = std::format("addip4={0}", addr.to_str('.', false));
 	shm_message_queue::message *m = allocate_shm_message(msg.size());
 	m->type = shm_message_queue::msg_new;
-	m->size = msg.size();
 	memcpy(m->data, msg.c_str(), m->size);
 
 	int i = 0;

@@ -37,7 +37,6 @@ void push_resolver_reply(shm_message_queue *const shm_resolver, const std::strin
 	DOLOG(logger::ll_debug, "Pushing reply \"%s\" to \"%s\"", reply.c_str(), to.c_str());
 	shm_message_queue::message *m_reply = allocate_shm_message(reply.size());
 	m_reply->type   = shm_message_queue::msg_reply;
-	m_reply->size   = reply.size();
 	m_reply->msg_nr = msg_nr;
 	memcpy(m_reply->data, reply.c_str(), m_reply->size);
 	shm_resolver->send_message(to, m_reply, false);
