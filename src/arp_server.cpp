@@ -313,7 +313,6 @@ std::optional<uint64_t> send_meta_request(shm_message_queue *const shm_meta, con
         return { };
 }
 
-
 std::pair<addr_mac, addr_ip4> cfg_runtime(shm_message_queue *const shm_meta,
 		const std::string & meta_name_Ethernet_server, const std::string & meta_name_ip4_server)
 {
