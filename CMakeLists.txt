@@ -52,9 +52,10 @@ add_executable(tap_server
 	)
 
 add_executable(promiscuous_server
+	src/promisc_server.cpp
 	src/utils/net.cpp
 	src/utils/shm_message.cpp
-	src/promisc_server.cpp
+	src/utils/str.cpp
 	)
 
 add_executable(arp_server
