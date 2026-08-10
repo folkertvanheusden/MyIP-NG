@@ -53,12 +53,14 @@ add_executable(checksum_test
 add_executable(tap_server
 	src/utils/net.cpp
 	src/utils/shm_message.cpp
+	src/utils/stoi.cpp
 	src/tap_server.cpp
 	)
 
 add_executable(promiscuous_server
 	src/utils/net.cpp
 	src/utils/shm_message.cpp
+	src/utils/stoi.cpp
 	src/promisc_server.cpp
 	)
 
@@ -74,6 +76,7 @@ add_executable(ip4_server
 	src/utils/checksum.cpp
 	src/utils/net.cpp
 	src/utils/shm_message.cpp
+	src/utils/stoi.cpp
 	src/utils/str.cpp
 	src/utils/time.cpp
 	)
@@ -94,6 +97,7 @@ add_executable(tcp_server
 	src/utils/net.cpp
 	src/utils/shm_message.cpp
 	src/utils/str.cpp
+	src/utils/stoi.cpp
 	)
 
 add_executable(udp_server
@@ -101,6 +105,7 @@ add_executable(udp_server
 	src/utils/checksum.cpp
 	src/utils/net.cpp
 	src/utils/shm_message.cpp
+	src/utils/stoi.cpp
 	)
 
 add_executable(ntp_server

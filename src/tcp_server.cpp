@@ -19,6 +19,7 @@ extern "C" {
 #include "utils/net.h"
 #include "utils/shm.h"
 #include "utils/shm_message.h"
+#include "utils/stoi.h"
 
 
 #define FLAG_CWR (1 << 7)
@@ -454,10 +455,10 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 				}
 			}
 			else if (parts[0] == "session-id") {
-				session_id = std::stoi(parts[1], nullptr, 16);  // TODO capture exceptions
+				session_id = my_stoi_hex(parts[1]);
 			}
 			else if (parts[0] == "dst-port") {
-				dst_port = std::stoi(parts[1]);  // TODO capture exceptions
+				dst_port = my_stoi_dec(parts[1]);
 			}
 			else if (parts[0] == "dst-addr-ip4") {
 				dst_addr = addr(parts[1], ".", false);
@@ -596,8 +597,10 @@ void load_mappings(std::map<uint16_t, std::string> *const mappings_in, const dic
 			fprintf(stderr, "Mapping \"%s\" is invalid\n", keys[i]);
 			exit(1);
 		}
-		uint16_t    k   = std::stoi(col + 1);
-		mappings_in->insert({ k, v });
+		auto k = my_stoi_dec(col + 1);
+		if (k.has_value() == false)
+			exit(1);
+		mappings_in->insert({ k.value(), v });
 	}
 
 	delete [] keys;

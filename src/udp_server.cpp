@@ -13,6 +13,7 @@
 #include "utils/net.h"
 #include "utils/shm.h"
 #include "utils/shm_message.h"
+#include "utils/stoi.h"
 
 
 std::atomic_bool stop_flag { false };
@@ -208,8 +209,10 @@ void load_mappings(std::map<uint16_t, std::string> *const mappings_in, const dic
 			fprintf(stderr, "Mapping \"%s\" is invalid\n", keys[i]);
 			exit(1);
 		}
-		uint16_t    k   = std::stoi(col + 1);
-		mappings_in->insert({ k, v });
+		auto    k   = my_stoi_dec(col + 1);
+		if (k.has_value() == false)
+			exit(1);
+		mappings_in->insert({ k.value(), v });
 	}
 
 	delete [] keys;

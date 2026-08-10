@@ -19,6 +19,7 @@
 #include "utils/net.h"
 #include "utils/shm.h"
 #include "utils/shm_message.h"
+#include "utils/stoi.h"
 #include "utils/str.h"
 #include "utils/time.h"
 
@@ -605,9 +606,11 @@ void load_mappings(std::map<uint8_t, std::string> *const mappings_in, std::map<s
 			fprintf(stderr, "Mapping \"%s\" is invalid\n", keys[i]);
 			exit(1);
 		}
-		uint16_t    k   = std::stoi(col + 1);
-		mappings_in ->insert({ k, v });
-		mappings_out->insert({ v, k });
+		auto k = my_stoi_dec(col + 1);
+		if (k.has_value() == false)
+			exit(1);
+		mappings_in ->insert({ k.value(), v });
+		mappings_out->insert({ v, k.value() });
 	}
 
 	delete [] keys;
@@ -690,7 +693,9 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"listen-addr\": CIDR missing\n");
 		return 1;
 	}
-	int cidr = std::stoi(listen_addr_str.substr(slash + 1));
+	auto cidr = my_stoi_dec(listen_addr_str.substr(slash + 1));
+	if (cidr.has_value() == false)
+		return 1;
 	addr_ip4 listen_addr(listen_addr_str.substr(0, slash), ".", false);
         std::string announce_ip4_addr = iniparser_getstring(d, "specific:announce-ip4-addr", "");
         if (announce_ip4_addr.empty()) {
@@ -722,7 +727,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	run(&shm, announce_ip4_addr, { listen_addr, cidr }, default_gw_addr, mappings_in, mappings_out,
+	run(&shm, announce_ip4_addr, { listen_addr, cidr.value() }, default_gw_addr, mappings_in, mappings_out,
             icmp_error_name, out_name, &shm_resolver_replies, resolver_name, &shm_upper_in,
 	    mtu_size);
 
