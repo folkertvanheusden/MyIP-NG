@@ -1,1 +1,2 @@
 #define SLEEP_INTERVAL_MS 100
+#define META_SHM_SIZE 512

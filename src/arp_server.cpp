@@ -458,7 +458,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	shm_message_queue shm_meta(meta_name, 512);
+	shm_message_queue shm_meta(meta_name, META_SHM_SIZE);
 	if (shm_meta.begin() == false) {
 		fprintf(stderr, "Cannot initialize shared memory segment for meta channel\n");
 		return 1;
