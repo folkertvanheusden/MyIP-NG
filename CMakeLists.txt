@@ -27,7 +27,7 @@ add_executable(shm_test
 	src/tests/shm_test.cpp
 	)
 
-add_executable(addresses_test.cpp
+add_executable(addresses_test
 	src/tests/addresses_test.cpp
 	src/utils/str.cpp
 	)
@@ -109,8 +109,10 @@ add_executable(ntp_server
 	src/utils/shm_message.cpp
 	)
 
+target_link_libraries(addresses_test log)
 target_link_libraries(arp_server shm log)
 target_link_libraries(arp_test shm log)
+target_link_libraries(checksum_test log)
 target_link_libraries(icmp_server shm log)
 target_link_libraries(ip4_server shm log)
 target_link_libraries(ntp_server shm log)
