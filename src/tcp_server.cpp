@@ -661,6 +661,12 @@ int main(int argc, char *argv[])
 		msg_queue_size = 16384;
 		fprintf(stderr, "Using default msg queue size of %d bytes\n", msg_queue_size);
 	}
+	std::string send_addr_str = iniparser_getstring(d, "specific:send-addr", "");
+	if (send_addr_str.empty()) {
+		fprintf(stderr, "\"send-addr\" under \"specific\" missing\n");
+		return 1;
+	}
+	addr_ip4 send_addr(send_addr_str, ".", false);
 	std::map<uint16_t, std::string> mappings_in;
 	load_mappings(&mappings_in, d);
 	iniparser_freedict(d);
@@ -684,12 +690,6 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", name_meta.c_str());
 		return 1;
 	}
-	std::string send_addr_str = iniparser_getstring(d, "specific:send-addr",  "");
-	if (send_addr_str.empty()) {
-		fprintf(stderr, "\"send-addr\" under \"specific\" missing\n");
-		return 1;
-	}
-	addr_ip4 send_addr(send_addr_str, ".", false);
 
 	std::map<uint64_t, session_t *> sessions;
 	std::mutex sessions_lock;
