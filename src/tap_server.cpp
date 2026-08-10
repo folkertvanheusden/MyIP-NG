@@ -16,13 +16,12 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 
+#include "utils/addresses.h"
 #include "utils/gen.h"
 #include "utils/log.h"
 #include "utils/shm.h"
 #include "utils/shm_message.h"
 
-
-constexpr const uint8_t bc_addr[] { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
 std::atomic_bool stop_flag { false };
 
