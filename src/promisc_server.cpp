@@ -1,5 +1,6 @@
 #include <atomic>
 #include <cerrno>
+#include <cinttypes>
 #include <csignal>
 #include <cstdio>
 #include <cstring>
@@ -265,39 +266,54 @@ void run_out(shm_message_queue *const shm, const prom_handle & ph, const std::ma
 	}
 }
 
-void announcer(shm_message_queue *const shm, const uint8_t mac_addr[6], const std::string & announce_mac_name)
+void push_meta_reply(shm_message_queue *const shm_meta, const std::string & to, const std::string & reply, const uint64_t msg_nr)
 {
-	const std::string msg = std::format("setmac={0:02x}:{1:02x}:{2:02x}:{3:02x}:{4:02x}:{5:02x}",
-				mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-	shm_message_queue::message *m = allocate_shm_message(msg.size());
-	m->type = shm_message_queue::msg_new;
-	memcpy(m->data, msg.c_str(), m->size);
+	DOLOG(logger::ll_debug, "Pushing reply \"%s\" to \"%s\" (id: %" PRIu64 ")", reply.c_str(), to.c_str(), msg_nr);
 
-	int i = 0;
+	shm_message_queue::message *m_reply = allocate_shm_message(reply.size());
+	m_reply->type   = shm_message_queue::msg_reply;
+	m_reply->msg_nr = msg_nr;
+	memcpy(m_reply->data, reply.c_str(), m_reply->size);
+	shm_meta->send_message(to, m_reply, false);
+	free(m_reply);
+}
+
+void run_meta(shm_message_queue *const shm_meta, const addr_mac & mac)
+{
 	while(!stop_flag) {
-		if (++i < 10) {
-			usleep(SLEEP_INTERVAL_MS * 1000);
+		shm_message_queue::message *m = shm_meta->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
+		if (!m)
+			continue;
+
+		std::string kv(reinterpret_cast<const char *>(m->data), m->size);
+		auto parts = split(kv, "=");
+
+		DOLOG(logger::ll_debug, "Processing \"%s\"", kv.c_str());
+
+		if (parts[0] == "get-mac") {  // retrieve MAC address
+			auto reply = "mac=" + mac.to_str(':', true);
+			push_meta_reply(shm_meta, m->sender, reply, m->msg_nr);
+		}
+		else {
+			DOLOG(logger::ll_error, "Invalid command (%s)", kv.c_str());
+			free(m);
 			continue;
 		}
-		i = 0;
 
-		// announce-mac-name to ARP process
-		DOLOG(logger::ll_debug, "Announce \"%s\" to %s", msg.c_str(), announce_mac_name.c_str());
-		shm->send_message(announce_mac_name, m, false);
+		free(m);
 	}
-
-	free(m);
 }
 
 void run(shm_message_queue *const shm, const prom_handle & ph,
 		const std::map<uint16_t, std::string> & mappings_in,
 		const std::map<std::string, uint16_t> & mappings_out,
-		const std::string & announce_mac_name)
+		const std::string & announce_mac_name,
+		shm_message_queue *const shm_meta)
 {
-	std::thread rx([&] { run_in (shm, ph, mappings_in ); });
-	std::thread tx([&] { run_out(shm, ph, mappings_out); });
-	std::thread announce([shm, ph, announce_mac_name] { announcer(shm, ph.mac_addr, announce_mac_name); });
-	announce.join();
+	std::thread rx  ([&] { run_in (shm, ph, mappings_in );               });
+	std::thread tx  ([&] { run_out(shm, ph, mappings_out);               });
+	std::thread meta([&] { run_meta(shm_meta, addr_mac(ph.mac_addr, 6)); });
+	meta.join();
 	tx.join();
 	rx.join();
 }
@@ -332,6 +348,11 @@ int main(int argc, char *argv[])
 	std::string device_name = iniparser_getstring(d, "specific:dev", "");
 	if (device_name.empty()) {
 		fprintf(stderr, "\"dev\" under \"specific\" missing\n");
+		return 1;
+	}
+	std::string meta_name = iniparser_getstring(d, "global:meta-name", "");
+	if (meta_name.empty()) {
+		fprintf(stderr, "\"meta-name\" under \"global\" missing\n");
 		return 1;
 	}
 	std::string announce_mac_name = iniparser_getstring(d, "specific:announce-mac-name", "");
@@ -385,7 +406,13 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	run(&shm, handle.value(), mappings_in, mappings_out, announce_mac_name);
+	shm_message_queue shm_meta(meta_name, META_SHM_SIZE);
+	if (shm_meta.begin() == false) {
+		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", meta_name.c_str());
+		return 1;
+	}
+
+	run(&shm, handle.value(), mappings_in, mappings_out, announce_mac_name, &shm_meta);
 
 	return 0;
 }

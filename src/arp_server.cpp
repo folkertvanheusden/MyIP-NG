@@ -1,6 +1,7 @@
 #include <atomic>
 #include <cassert>
 #include <cerrno>
+#include <cinttypes>
 #include <csignal>
 #include <map>
 #include <mutex>
@@ -44,8 +45,8 @@ void push_resolver_reply(shm_message_queue *const shm_resolver, const std::strin
 }
 
 void run_resolver(shm_message_queue *const shm_resolver, std::vector<request> *const requests, std::mutex & requests_lock,
-		  const std::set<addr_ip4, addr> & ip4_list, std::mutex & ip4_lock,
-		  const addr_mac & mac,                                   std::mutex & mac_lock,
+		  const addr_ip4 & ip4_addr,
+		  const addr_mac & mac,
 		  const std::string & out_name,
 		  shm_message_queue *const shm_out,
 		  std::map<addr_ip4, addr_mac, addr> *arp_cache, std::mutex & arp_cache_lock)
@@ -63,9 +64,7 @@ void run_resolver(shm_message_queue *const shm_resolver, std::vector<request> *c
 			continue;
 		}
 
-		mac_lock.lock();
 		addr_mac SHA = mac;
-		mac_lock.unlock();
 		addr_ip4 SPA(4);
 		addr_mac THA(bc_addr, 6);
 		addr_ip4 TPA(4);
@@ -77,20 +76,11 @@ void run_resolver(shm_message_queue *const shm_resolver, std::vector<request> *c
 			TPA   = r.ip4.value();
 
 			// if me, return right away
-			{
-				std::unique_lock<std::mutex> lck(ip4_lock);
-				if (ip4_list.find(r.ip4.value()) != ip4_list.end()) {
-					lck.unlock();
-					auto reply = "ip4:" + r.ip4.value().to_str('.', false) + "=mac:" + SHA.to_str(':', true);
-					push_resolver_reply(shm_resolver, m->sender, reply, m->msg_nr);
-					free(m);
-					continue;
-				}
-
-				if (ip4_list.empty() == false)
-					SPA = *ip4_list.begin();
-				else
-					DOLOG(logger::ll_info, "Cannot set TPA for ARP: not known yet");
+			if (r.ip4.value() == ip4_addr) {
+				auto reply = "ip4:" + r.ip4.value().to_str('.', false) + "=mac:" + SHA.to_str(':', true);
+				push_resolver_reply(shm_resolver, m->sender, reply, m->msg_nr);
+				free(m);
+				continue;
 			}
 
 			// in cache?
@@ -188,9 +178,8 @@ void register_resolve_reply(shm_message_queue *const shm_resolver,
 
 // Ethernet -> ARP
 void run_in(shm_message_queue *const shm,
-	    const addr_mac & mappings_in,                               std::mutex & mac_lock,
-            const std::set<addr_ip4, addr> & mappings_out, std::mutex & ip4_lock,
-	    std::vector<request> *const requests,                       std::mutex & requests_lock,
+	    const addr_mac & mac_addr, const addr_ip4 & ip4_addr,
+	    std::vector<request> *const requests, std::mutex & requests_lock,
 	    shm_message_queue *const shm_resolver,
 	    std::map<addr_ip4, addr_mac, addr> *arp_cache, std::mutex & arp_cache_lock)
 {
@@ -198,24 +187,6 @@ void run_in(shm_message_queue *const shm,
 		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
 		if (!m)
 			continue;
-
-		{
-			std::unique_lock<std::mutex> lck(ip4_lock);
-			if (mappings_out.empty()) {
-				DOLOG(logger::ll_info, "No IP4 addresses known yet, dropping packet");
-				free(m);
-				continue;
-			}
-		}
-
-		{
-			std::unique_lock<std::mutex> lck(mac_lock);
-			if (mappings_in.a_len == 0) {
-				DOLOG(logger::ll_info, "No MAC address known yet, dropping packet");
-				free(m);
-				continue;
-			}
-		}
 
 		size_t         full_pkt_len = 0;
 		size_t         from_len     = 0;
@@ -267,15 +238,7 @@ void run_in(shm_message_queue *const shm,
 
 			if (operation == 1) {  // request
 					       // see if TPA is known
-				bool known = false;
-				{
-					std::unique_lock<std::mutex> lck(ip4_lock);
-					auto it = mappings_out.find(TPA);
-					if (it != mappings_out.end())
-						known = true;
-				}
-
-				if (known) {
+				if (TPA == ip4_addr) {
 					uint8_t payload_out[28];
 					memcpy(payload_out, pl, 28);
 					SHA.get(&payload_out[18]);  // set THA to SHA
@@ -283,23 +246,20 @@ void run_in(shm_message_queue *const shm,
 					payload_out[6] = 0;
 					payload_out[7] = 2;
 					// MAC address
-					{
-						std::unique_lock<std::mutex> lck(mac_lock);
-						mappings_in.get(&payload_out[8]);  // me
-					}
+					mac_addr.get(&payload_out[8]);  // me
 					SPA.get(&payload_out[24]);  // who will receive
 					TPA.get(&payload_out[14]);  // who will sent [mne]
 					assert(SPA != TPA);
 
 					// push to Ethernet
 					uint8_t from[6] { };
-					mappings_in.get(from);
+					mac_addr.get(from);
 					uint8_t to  [6] { };
 					SHA.get(to);
 					auto temp_msg_nr = m->msg_nr;
 
 					DOLOG(logger::ll_debug, "Sending reply with MAC address %s",
-							mappings_in.to_str(':', true).c_str());
+							mac_addr.to_str(':', true).c_str());
 
 					shm_message_queue::message *m_out = wrap_message_down(
 							sizeof from,         from,
@@ -338,59 +298,79 @@ void run_in(shm_message_queue *const shm,
 	}
 }
 
-void run_cfg(addr_mac & mappings_in,                               std::mutex & mac_lock,
-	     std::set<addr_ip4, addr> & mappings_out, std::mutex & ip4_lock,
-	     shm_message_queue *const shm_cfg)
+std::optional<uint64_t> send_meta_request(shm_message_queue *const shm_meta, const std::string & peer_name, const std::string & request)
 {
+        shm_message_queue::message *meta_request_msg = allocate_shm_message(request.size());
+        meta_request_msg->type = shm_message_queue::msg_new;
+        memcpy(meta_request_msg->data, request.c_str(), request.size());
+        if (shm_meta->send_message(peer_name, meta_request_msg, true)) {
+                uint64_t msg_nr = meta_request_msg->msg_nr;
+                free(meta_request_msg);
+                return msg_nr;
+        }
+
+        free(meta_request_msg);
+        return { };
+}
+
+
+std::pair<addr_mac, addr_ip4> cfg_runtime(shm_message_queue *const shm_meta,
+		const std::string & meta_name_Ethernet_server, const std::string & meta_name_ip4_server)
+{
+	std::optional<addr_mac> mac_addr;
+	std::optional<addr_ip4> ip4_addr;
+
 	while(!stop_flag) {
-		shm_message_queue::message *m = shm_cfg->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
-		if (!m)
-			continue;
+		if (mac_addr.has_value() == false) {
+			DOLOG(logger::ll_debug, "Requesting MAC address from \"%s\"", meta_name_Ethernet_server.c_str());
 
-		std::string kv(reinterpret_cast<const char *>(m->data), m->size);
-		auto parts = split(kv, "=");
-		if (parts.size() != 2) {
-			DOLOG(logger::ll_error, "Not a command pair via shared configuration memory (%s)", kv.c_str());
-			free(m);
-			continue;
+			auto msg_nr = send_meta_request(shm_meta, meta_name_Ethernet_server, "get-mac");
+			if (msg_nr.has_value()) {
+				DOLOG(logger::ll_debug, "Waiting for msg-id %" PRIu64, msg_nr.value());
+				auto *reply = shm_meta->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_reply, msg_nr.value());
+				if (reply) {
+					std::string reply_str(reinterpret_cast<const char *>(reply->data), reply->size);
+					if (reply_str.substr(0, 4) == "mac=")
+						mac_addr = addr(reply_str.substr(4), ":", true);
+					free(reply);
+				}
+			}
 		}
 
-		DOLOG(logger::ll_debug, "Received cfg item: \"%s\"", kv.c_str());
+		if (ip4_addr.has_value() == false) {
+			DOLOG(logger::ll_debug, "Requesting IP4 address from \"%s\"", meta_name_ip4_server.c_str());
 
-		if (parts[0] == "setmac") {
-			addr new_mac(parts[1], ":", true);
-			std::unique_lock<std::mutex> lck(mac_lock);
-			mappings_in = new_mac;
-		}
-		else if (parts[0] == "addip4") {
-			addr new_ip4(parts[1], ".", false);
-			std::unique_lock<std::mutex> lck(ip4_lock);
-			mappings_out.insert(new_ip4);
-		}
-		else if (parts[0] == "delip4") {
-			addr del_ip4(parts[1], ".", false);
-			std::unique_lock<std::mutex> lck(ip4_lock);
-			mappings_out.erase(del_ip4);
+			auto msg_nr = send_meta_request(shm_meta, meta_name_ip4_server, "get-ip4");
+			if (msg_nr.has_value()) {
+				auto *reply = shm_meta->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_reply, msg_nr.value());
+				if (reply) {
+					std::string reply_str(reinterpret_cast<const char *>(reply->data), reply->size);
+					if (reply_str.substr(0, 4) == "ip4=")
+						ip4_addr = addr(reply_str.substr(4), ".", false);
+					free(reply);
+				}
+			}
 		}
 
-		free(m);
+		if (mac_addr.has_value() == true && ip4_addr.has_value() == true)
+			return { mac_addr.value(), ip4_addr.value() };
+
+		usleep(500'000);
 	}
+
+	return { };
 }
 
 void run(shm_message_queue *const shm,
-         addr_mac & mac,                                   std::mutex & mac_lock,
-         std::set<addr_ip4, addr> & ip4_list, std::mutex & ip4_lock,
-	 shm_message_queue *const shm_cfg,
+         addr_mac & mac_addr, addr_ip4 & ip4_addr,
 	 std::vector<request> *const requests, std::mutex & requests_lock,
 	 shm_message_queue *const shm_resolver,
 	 const std::string & out_name,
 	 std::map<addr_ip4, addr_mac, addr> *arp_cache, std::mutex & arp_cache_lock)
 {
-	std::thread res([&] { run_resolver(shm_resolver, requests, requests_lock, ip4_list, ip4_lock, mac, mac_lock, out_name, shm, arp_cache, arp_cache_lock); });
-	std::thread cfg([&] { run_cfg(mac, mac_lock, ip4_list, ip4_lock, shm_cfg); });
-	std::thread rx ([&] { run_in (shm, mac, mac_lock, ip4_list, ip4_lock, requests, requests_lock, shm_resolver, arp_cache, arp_cache_lock); });
+	std::thread res([&] { run_resolver(shm_resolver, requests, requests_lock, ip4_addr, mac_addr, out_name, shm, arp_cache, arp_cache_lock); });
+	std::thread rx ([&] { run_in(shm, mac_addr, ip4_addr, requests, requests_lock, shm_resolver, arp_cache, arp_cache_lock); });
 	rx.join();
-	cfg.join();
 	res.join();
 }
 
@@ -433,9 +413,24 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"out-name\" under \"global\" missing\n");
 		return 1;
 	}
-	std::string resolver_name = iniparser_getstring(d, "specific:resolver-name",  "");
+	std::string resolver_name = iniparser_getstring(d, "global:resolver-name",  "");
 	if (resolver_name.empty()) {
-		fprintf(stderr, "\"resolver-name\" under \"specific\" missing\n");
+		fprintf(stderr, "\"resolver-name\" under \"global\" missing\n");
+		return 1;
+	}
+	std::string meta_name = iniparser_getstring(d, "global:meta-name",  "");
+	if (meta_name.empty()) {
+		fprintf(stderr, "\"meta-name\" under \"global\" missing\n");
+		return 1;
+	}
+	std::string ether_meta_name = iniparser_getstring(d, "global:ether-meta-name",  "");
+	if (ether_meta_name.empty()) {
+		fprintf(stderr, "\"ether-meta-name\" under \"global\" missing\n");
+		return 1;
+	}
+	std::string ip4_meta_name = iniparser_getstring(d, "global:ip4-meta-name",  "");
+	if (ip4_meta_name.empty()) {
+		fprintf(stderr, "\"ip4-meta-name\" under \"global\" missing\n");
 		return 1;
 	}
 	int msg_queue_size = iniparser_getint(d, "specific:msg-queue-size", 0);
@@ -443,12 +438,7 @@ int main(int argc, char *argv[])
 		msg_queue_size = 16384;
 		fprintf(stderr, "Using default msg queue size of %d bytes\n", msg_queue_size);
 	}
-	int msg_queue_size_cfg      = iniparser_getint(d, "specific:msg-queue-size-cfg", 512);
 	int msg_queue_size_resolver = iniparser_getint(d, "specific:msg-queue-size-resolver", 2048);
-	std::mutex m_in_lock;
-	addr_mac   mac;
-	std::mutex m_out_lock;
-	std::set<addr_ip4, addr> ip4_list;
 	iniparser_freedict(d);
 
 	std::vector<request> requests;
@@ -462,22 +452,26 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	shm_message_queue shm_cfg(cfg_name, msg_queue_size_cfg);
-	if (shm_cfg.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment for configuration channel\n");
-		return 1;
-	}
-
 	shm_message_queue shm_resolver(resolver_name, msg_queue_size_resolver);
 	if (shm_resolver.begin() == false) {
 		fprintf(stderr, "Cannot initialize shared memory segment for resolver channel\n");
 		return 1;
 	}
 
+	shm_message_queue shm_meta(meta_name, META_SHM_SIZE);
+	if (shm_meta.begin() == false) {
+		fprintf(stderr, "Cannot initialize shared memory segment for meta channel\n");
+		return 1;
+	}
+
+	auto     addresses = cfg_runtime(&shm_meta, ether_meta_name, ip4_meta_name);
+	addr_mac mac_addr  = addresses.first;
+	addr_ip4 ip4_addr  = addresses.second;
+
 	std::map<addr_ip4, addr_mac, addr> cache;
 	std::mutex cache_lock;
 
-	run(&shm, mac, m_in_lock, ip4_list, m_out_lock, &shm_cfg, &requests, requests_lock, &shm_resolver, out_name, &cache, cache_lock);
+	run(&shm, mac_addr, ip4_addr, &requests, requests_lock, &shm_resolver, out_name, &cache, cache_lock);
 
 	return 0;
 }

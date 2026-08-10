@@ -549,43 +549,59 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 	th_cleaner.join();
 }
 
-void announcer(shm_message_queue *const shm, const std::string & announce_ip4_addr, const addr_ip4 & addr)
+void push_meta_reply(shm_message_queue *const shm_meta, const std::string & to, const std::string & reply, const uint64_t msg_nr)
 {
-	const std::string msg = std::format("addip4={0}", addr.to_str('.', false));
-	shm_message_queue::message *m = allocate_shm_message(msg.size());
-	m->type = shm_message_queue::msg_new;
-	memcpy(m->data, msg.c_str(), m->size);
+	DOLOG(logger::ll_debug, "Pushing reply \"%s\" to \"%s\" (id: %" PRIu64 ")", reply.c_str(), to.c_str(), msg_nr);
 
-	int i = 0;
-	while(!stop_flag) {
-		if (++i < 10) {
-			usleep(SLEEP_INTERVAL_MS * 1000);
-			continue;
-		}
-		i = 0;
-
-		// announce-ip4-addr to ARP process
-		DOLOG(logger::ll_debug, "Announce \"%s\" to %s", msg.c_str(), announce_ip4_addr.c_str());
-		shm->send_message(announce_ip4_addr, m, false);
-	}
-
-	free(m);
+	shm_message_queue::message *m_reply = allocate_shm_message(reply.size());
+	m_reply->type   = shm_message_queue::msg_reply;
+	m_reply->msg_nr = msg_nr;
+	memcpy(m_reply->data, reply.c_str(), m_reply->size);
+	shm_meta->send_message(to, m_reply, false);
+	free(m_reply);
 }
 
-void run(shm_message_queue *const shm, const std::string & announce_ip4_addr, const std::pair<addr_ip4, int> & listen_addr,
+void run_meta(shm_message_queue *const shm_meta, const addr_ip4 & ip4)
+{
+	while(!stop_flag) {
+		shm_message_queue::message *m = shm_meta->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
+		if (!m)
+			continue;
+
+		std::string kv(reinterpret_cast<const char *>(m->data), m->size);
+		auto parts = split(kv, "=");
+
+		DOLOG(logger::ll_debug, "Processing \"%s\"", kv.c_str());
+
+		if (parts[0] == "get-ip4") {  // retrieve IP4 address
+			auto reply = "ip4=" + ip4.to_str('.', false);
+			push_meta_reply(shm_meta, m->sender, reply, m->msg_nr);
+		}
+		else {
+			DOLOG(logger::ll_error, "Invalid command (%s)", kv.c_str());
+			free(m);
+			continue;
+		}
+
+		free(m);
+	}
+}
+
+void run(shm_message_queue *const shm, const std::pair<addr_ip4, int> & listen_addr,
          const addr_ip4 & default_gw_addr,
          const std::map<uint8_t, std::string> & mappings_in,
          const std::map<std::string, uint8_t> & mappings_out,
 	 const std::string & icmp_error_name, const std::string & link_name,
 	 shm_message_queue *const shm_resolver_replies, const std::string & resolver_name,
 	 shm_message_queue *const upper_in,
-	 const int mtu_size)
+	 const int mtu_size,
+	 shm_message_queue *const shm_meta)
 {
 	std::thread rx([&] { run_in (shm, listen_addr, mappings_in,  icmp_error_name); });
 	std::thread tx([&] { run_out(shm, listen_addr, default_gw_addr, mappings_out, link_name,
 				shm_resolver_replies, resolver_name, upper_in, mtu_size); });
-        std::thread announce([shm, announce_ip4_addr, listen_addr] { announcer(shm, announce_ip4_addr, listen_addr.first); });
-        announce.join();
+	std::thread meta([&] { run_meta(shm_meta, listen_addr.first); });
+	meta.join();
         tx.join();
 	rx.join();
 }
@@ -687,6 +703,11 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"default-gw\" under \"specific\" missing\n");
 		return 1;
 	}
+	std::string meta_name = iniparser_getstring(d, "global:meta-name", "");
+	if (meta_name.empty()) {
+		fprintf(stderr, "\"meta-name\" under \"global\" missing\n");
+		return 1;
+	}
 	addr_ip4 default_gw_addr(default_gw_addr_str, ".", false);
 	auto slash = listen_addr_str.find('/');
 	if (slash == std::string::npos) {
@@ -697,11 +718,6 @@ int main(int argc, char *argv[])
 	if (cidr.has_value() == false)
 		return 1;
 	addr_ip4 listen_addr(listen_addr_str.substr(0, slash), ".", false);
-        std::string announce_ip4_addr = iniparser_getstring(d, "specific:announce-ip4-addr", "");
-        if (announce_ip4_addr.empty()) {
-                fprintf(stderr, "\"announce-ip4-addr\" under \"specific\" missing\n");
-                return 1;
-        }
 	std::map<uint8_t, std::string> mappings_in;
 	std::map<std::string, uint8_t> mappings_out;
 	load_mappings(&mappings_in, &mappings_out, d);
@@ -727,9 +743,16 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	run(&shm, announce_ip4_addr, { listen_addr, cidr.value() }, default_gw_addr, mappings_in, mappings_out,
+	shm_message_queue shm_meta(meta_name, META_SHM_SIZE);
+	if (shm_meta.begin() == false) {
+		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", meta_name.c_str());
+		return 1;
+	}
+
+	run(&shm, { listen_addr, cidr.value() }, default_gw_addr, mappings_in, mappings_out,
             icmp_error_name, out_name, &shm_resolver_replies, resolver_name, &shm_upper_in,
-	    mtu_size);
+	    mtu_size,
+	    &shm_meta);
 
 	return 0;
 }
