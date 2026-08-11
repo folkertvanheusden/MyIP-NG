@@ -614,7 +614,6 @@ std::optional<uint64_t> send_meta_request(shm_message_queue *const shm_meta, con
         memcpy(meta_request_msg->data, request.c_str(), request.size());
         if (shm_meta->send_message(peer_name, meta_request_msg, false)) {
                 uint64_t msg_nr = meta_request_msg->msg_nr;
-		printf("%" PRIu64 "\n", msg_nr);
                 free(meta_request_msg);
                 return msg_nr;
         }
