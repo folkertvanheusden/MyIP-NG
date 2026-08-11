@@ -571,7 +571,7 @@ void run_meta(shm_message_queue *const shm_meta, const addr_ip4 & ip4)
 		std::string kv(reinterpret_cast<const char *>(m->data), m->size);
 		auto parts = split(kv, "=");
 
-		DOLOG(logger::ll_debug, "Processing \"%s\"", kv.c_str());
+		DOLOG(logger::ll_debug, "Processing \"%s\" in msg %" PRIu64 " from \"%s\"", kv.c_str(), m->msg_nr, m->sender);
 
 		if (parts[0] == "get-ip4") {  // retrieve IP4 address
 			auto reply = "ip4=" + ip4.to_str('.', false);
