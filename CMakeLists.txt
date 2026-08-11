@@ -31,6 +31,10 @@ add_executable(shm_dump
 	src/tests/shm_dump.cpp
 	)
 
+add_executable(tcp_test
+	src/tests/tcp_test.cpp
+	)
+
 add_executable(addresses_test
 	src/tests/addresses_test.cpp
 	src/utils/str.cpp
@@ -133,6 +137,7 @@ target_link_libraries(shm_test shm log)
 target_link_libraries(shm_message_test shm log)
 target_link_libraries(tap_server shm log)
 target_link_libraries(tcp_server shm log)
+target_link_libraries(tcp_test shm log)
 target_link_libraries(udp_server shm log)
 
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
