@@ -137,7 +137,7 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 		uint8_t *end = &get_shm->data[get_shm->filled];
 		uint8_t *cur = &get_shm->data[0];
 		while(end - cur >= long(sizeof(message))) {
-			message *m      = reinterpret_cast<message *>(cur);
+			message *m            = reinterpret_cast<message *>(cur);
 			uint32_t length       = m->size;
 			size_t   total_length = PAD8(sizeof(message) + length);
 			uint64_t cur_msg_nr   = m->msg_nr;
@@ -235,7 +235,8 @@ bool shm_message_queue::send_message(const std::string & remote_identifier, mess
 		}
 	}
 
-	m->msg_nr = ++put_shm->most_recent_msg_nr;
+	if (m->type != msg_reply)
+		m->msg_nr = ++put_shm->most_recent_msg_nr;
 	memset(m->sender, 0x00, sizeof(m->sender));
 	memcpy(m->sender, local_identifier.c_str(), local_identifier.size());
 
