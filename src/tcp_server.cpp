@@ -477,6 +477,8 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 
 		if (action == open) {
 			if (dst_port.has_value() && dst_addr.has_value()) {
+				DOLOG(logger::ll_debug, "Opening TCP session to [%s]:%d",
+					dst_addr.value().to_str('.', false).c_str(), dst_port.value());
 				bool     failed   = false;
 				uint16_t src_port = 0;
 				do {
@@ -518,6 +520,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 						delete new_session;
 					else {
 						local_allocated_ports.insert({ src_port, session_id });
+						DOLOG(logger::ll_debug, "New TCP client session with id %" PRIx64, session_id);
 
 						std::unique_lock<std::mutex> lck(sessions_lock);
 						sessions->insert({ session_id, new_session });
@@ -551,7 +554,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 					sessions->erase(it);
 				}
 				else {
-					DOLOG(logger::ll_warning, "TCP meta: session %x not in map", session_id);
+					DOLOG(logger::ll_warning, "TCP meta: session %" PRIx64 " not in map", session_id);
 				}
 			}
 			else {
