@@ -20,6 +20,7 @@ extern "C" {
 #include "utils/shm.h"
 #include "utils/shm_message.h"
 #include "utils/stoi.h"
+#include "utils/time.h"
 
 
 #define FLAG_CWR (1 << 7)
@@ -606,6 +607,60 @@ void load_mappings(std::map<uint16_t, std::string> *const mappings_in, const dic
 	delete [] keys;
 }
 
+std::optional<uint64_t> send_meta_request(shm_message_queue *const shm_meta, const std::string & peer_name, const std::string & request)
+{
+        shm_message_queue::message *meta_request_msg = allocate_shm_message(request.size());
+        meta_request_msg->type = shm_message_queue::msg_new;
+        memcpy(meta_request_msg->data, request.c_str(), request.size());
+        if (shm_meta->send_message(peer_name, meta_request_msg, false)) {
+                uint64_t msg_nr = meta_request_msg->msg_nr;
+		printf("%" PRIu64 "\n", msg_nr);
+                free(meta_request_msg);
+                return msg_nr;
+        }
+
+        free(meta_request_msg);
+        return { };
+}
+
+addr_ip4 cfg_runtime(shm_message_queue *const shm_meta, const std::string & meta_name_ip4_server)
+{
+	uint64_t last_tx = 0;
+	uint64_t msg_nr  = 0;
+	while(!stop_flag) {
+		uint64_t now = get_us();
+
+		if (now - last_tx > 2'000'000) {
+			DOLOG(logger::ll_debug, "Requesting IP4 address from \"%s\"", meta_name_ip4_server.c_str());
+
+			auto temp = send_meta_request(shm_meta, meta_name_ip4_server, "get-ip4");
+			if (temp.has_value()) {
+				last_tx = now;
+				msg_nr  = temp.value();
+				DOLOG(logger::ll_debug, "Message sent with id %" PRIu64, msg_nr);
+			}
+			else {
+				usleep(SLEEP_INTERVAL_MS);
+				continue;
+			}
+		}
+
+		auto *reply = shm_meta->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_reply, msg_nr);
+		if (reply) {
+			std::string reply_str(reinterpret_cast<const char *>(reply->data), reply->size);
+			DOLOG(logger::ll_debug, "Reply received: \"%s\"", reply_str.c_str());
+			free(reply);
+			if (reply_str.substr(0, 4) == "ip4=")
+				return addr(reply_str.substr(4), ".", false);
+			DOLOG(logger::ll_warning, "Unexpected reply");
+		}
+
+		usleep(100'000);
+	}
+
+	return addr();
+}
+
 int main(int argc, char *argv[])
 {
 	std::string cfg_file;
@@ -655,18 +710,17 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"icmp-error-name\" under \"specific\" missing\n");
 		return 1;
 	}
+	std::string ip4_meta_name = iniparser_getstring(d, "global:ip4-meta-name",  "");
+	if (ip4_meta_name.empty()) {
+		fprintf(stderr, "\"ip4-meta-name\" under \"global\" missing\n");
+		return 1;
+	}
 	int msg_queue_size_meta = iniparser_getint(d, "specific:meta-queue-size", 512);
 	int msg_queue_size = iniparser_getint(d, "specific:msg-queue-size", 0);
 	if (msg_queue_size == 0) {
 		msg_queue_size = 16384;
 		fprintf(stderr, "Using default msg queue size of %d bytes\n", msg_queue_size);
 	}
-	std::string send_addr_str = iniparser_getstring(d, "specific:send-addr", "");
-	if (send_addr_str.empty()) {
-		fprintf(stderr, "\"send-addr\" under \"specific\" missing\n");
-		return 1;
-	}
-	addr_ip4 send_addr(send_addr_str, ".", false);
 	std::map<uint16_t, std::string> mappings_in;
 	load_mappings(&mappings_in, d);
 	iniparser_freedict(d);
@@ -699,6 +753,10 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "getrandom failed: %s\n", strerror(errno));
 		return 1;
 	}
+
+	addr_ip4 send_addr = cfg_runtime(&shm_meta, ip4_meta_name);
+	if (stop_flag)
+		return 1;
 
 	run(&shm, out_name, mappings_in, &shm_upper, icmp_error_name, &sessions, sessions_lock, syn_cookie_salt, &shm_meta, send_addr);
 

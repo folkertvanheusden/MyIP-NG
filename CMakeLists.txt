@@ -104,6 +104,7 @@ add_executable(tcp_server
 	src/utils/shm_message.cpp
 	src/utils/str.cpp
 	src/utils/stoi.cpp
+	src/utils/time.cpp
 	)
 
 add_executable(udp_server
