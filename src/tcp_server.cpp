@@ -304,11 +304,12 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 							session->start_peer_seq = session->peer_seq = peer_seq_nr;
 						}
 						// send ACK
-						DOLOG(logger::ll_debug, "TCP session %" PRIx64 ", local: %u, ack: %u", session->local_seq + 1, session->peer_seq + 1);
+						session->peer_seq++;
+						DOLOG(logger::ll_debug, "TCP session %" PRIx64 ", local: %u, ack: %u", session->local_seq, session->peer_seq);
 						if (send_tcp_packet(shm, out_name,
 								a_to, a_from,  // swapped: reply
 								destination_port, source_port,  // swapped: reply
-								session->local_seq + 1, session->peer_seq + 1,
+								session->local_seq, session->peer_seq,
 								FLAG_ACK, session->window_size, { nullptr, 0 }) == false)
 						{
 							clean_session = true;
@@ -560,6 +561,8 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 						memcpy(m_rc->data, reply.c_str(), m_rc->size);
 						failed = !shm_meta->send_message(m->sender, m_rc, false);
 						free(m_rc);
+
+						new_session->local_seq++;
 					}
 
 					// if all went well:
