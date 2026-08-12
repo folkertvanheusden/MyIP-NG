@@ -23,6 +23,13 @@ add_library(log
 	src/utils/log.cpp
 )
 
+add_library(misc
+	src/utils/checksum.cpp
+	src/utils/net.cpp
+	src/utils/str.cpp
+	src/utils/time.cpp
+)
+
 add_executable(shm_test
 	src/tests/shm_test.cpp
 	)
@@ -38,78 +45,60 @@ add_executable(addresses_test
 
 add_executable(shm_message_test
 	src/tests/shm_message_test.cpp
-	src/utils/net.cpp
 	src/utils/shm_message.cpp
 	)
 
 add_executable(arp_test
 	src/tests/arp_test.cpp
-	src/utils/net.cpp
 	src/utils/shm_message.cpp
 	)
 
 add_executable(tap_server
-	src/utils/net.cpp
 	src/utils/shm_message.cpp
-	src/utils/str.cpp
 	src/tap_server.cpp
 	)
 
 add_executable(promiscuous_server
 	src/promisc_server.cpp
-	src/utils/net.cpp
 	src/utils/shm_message.cpp
-	src/utils/str.cpp
 	)
 
 add_executable(arp_server
 	src/arp_server.cpp
-	src/utils/net.cpp
 	src/utils/shm_message.cpp
-	src/utils/str.cpp
 	)
 
 add_executable(ip4_server
 	src/ip4_server.cpp
-	src/utils/checksum.cpp
-	src/utils/net.cpp
 	src/utils/shm_message.cpp
-	src/utils/str.cpp
-	src/utils/time.cpp
 	)
 
 add_executable(icmp_server
 	src/icmp_server.cpp
-	src/utils/checksum.cpp
-	src/utils/net.cpp
 	src/utils/shm_message.cpp
-	src/utils/str.cpp
-	src/utils/time.cpp
 	)
 
 add_executable(udp_server
 	src/udp_server.cpp
-	src/utils/checksum.cpp
-	src/utils/net.cpp
 	src/utils/shm_message.cpp
 	)
 
 add_executable(ntp_server
 	src/ntp_server.cpp
-	src/utils/net.cpp
 	src/utils/shm_message.cpp
 	)
 
-target_link_libraries(arp_server shm log)
+target_link_libraries(addresses_test log)
+target_link_libraries(arp_server shm log misc)
 target_link_libraries(arp_test shm log)
-target_link_libraries(icmp_server shm log)
-target_link_libraries(ip4_server shm log)
-target_link_libraries(ntp_server shm log)
-target_link_libraries(promiscuous_server shm log)
+target_link_libraries(icmp_server shm log misc)
+target_link_libraries(ip4_server shm log misc)
+target_link_libraries(ntp_server shm log misc)
+target_link_libraries(promiscuous_server shm log misc)
 target_link_libraries(shm_test shm log)
 target_link_libraries(shm_message_test shm log)
-target_link_libraries(tap_server shm log)
-target_link_libraries(udp_server shm log)
+target_link_libraries(tap_server shm log misc)
+target_link_libraries(udp_server shm log misc)
 
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
