@@ -17,6 +17,7 @@ add_compile_options(-Wall)
 
 add_library(shm
 	src/utils/shm.cpp
+	src/utils/shm_message.cpp
 )
 
 add_library(log
@@ -50,12 +51,10 @@ add_executable(addresses_test
 
 add_executable(shm_message_test
 	src/tests/shm_message_test.cpp
-	src/utils/shm_message.cpp
 	)
 
 add_executable(arp_test
 	src/tests/arp_test.cpp
-	src/utils/shm_message.cpp
 	)
 
 add_executable(checksum_test
@@ -63,44 +62,36 @@ add_executable(checksum_test
 	)
 
 add_executable(tap_server
-	src/utils/shm_message.cpp
 	src/tap_server.cpp
 	)
 
 add_executable(promiscuous_server
 	src/promisc_server.cpp
-	src/utils/shm_message.cpp
 	)
 
 add_executable(arp_server
 	src/arp_server.cpp
-	src/utils/shm_message.cpp
 	)
 
 add_executable(ip4_server
 	src/ip4_server.cpp
-	src/utils/shm_message.cpp
 	)
 
 add_executable(icmp_server
 	src/icmp_server.cpp
-	src/utils/shm_message.cpp
 	)
 
 add_executable(tcp_server
 	src/3dparty/SipHash/siphash.c
 	src/tcp_server.cpp
-	src/utils/shm_message.cpp
 	)
 
 add_executable(udp_server
 	src/udp_server.cpp
-	src/utils/shm_message.cpp
 	)
 
 add_executable(ntp_server
 	src/ntp_server.cpp
-	src/utils/shm_message.cpp
 	)
 
 target_link_libraries(addresses_test log)
