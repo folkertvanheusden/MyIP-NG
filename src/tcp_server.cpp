@@ -37,18 +37,21 @@ enum tcp_state_t { listen, syn_sent, syn_received, established, fin_wait_1, fin_
 
 struct session_t {
 	bool        is_client;
+	char        shm_peer[max_id_length];  // only valid for is_client == true
+
 	tcp_state_t state;
 	uint32_t    start_local_seq;
 	uint32_t    start_peer_seq;
 	uint32_t    local_seq;
 	uint32_t    peer_seq;
 	uint16_t    window_size;
-	std::mutex  lock;
 
 	addr        local_addr;
 	uint16_t    local_port;
 	addr        peer_addr;
 	uint16_t    peer_port;
+
+	std::mutex  lock;
 };
 
 std::atomic_bool stop_flag { false };
@@ -395,6 +398,54 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		}
 
 		// TODO
+		if (session != nullptr && tcp_pl_size > 0) {  // TODO check sequence numbers
+			if (peer_seq_nr == session->peer_seq) {
+				shm_message_queue::message *m_session = allocate_shm_message(tcp_pl_size + 8);
+				m_session->type = shm_message_queue::msg_new;
+				assert(sizeof(session_id) == 8);
+				memcpy(&m_session->data[0], &session_id, sizeof session_id);
+				memcpy(&m_session->data[8], &pl[header_size], tcp_pl_size);
+				bool ok = shm->send_message(session->shm_peer, m_session, false);
+				free(m_session);
+
+				if (ok) {
+					DOLOG(logger::ll_debug, "Session %" PRIx64 ", data sent to client", session_id);
+					if (send_tcp_packet(shm, out_name,
+							a_to, a_from,  // swapped: reply
+							destination_port, source_port,  // swapped: reply
+							session->local_seq, session->peer_seq,
+							FLAG_ACK, session->window_size, { nullptr, 0 })) {
+						session->peer_seq += tcp_pl_size;
+					}
+					else
+					{
+						clean_session = true;
+						DOLOG(logger::ll_debug, "Could not ACK data for session %" PRIx64, session_id);
+					}
+				}
+				else {
+					DOLOG(logger::ll_debug, "Cannot send to peer shm, session %" PRIx64, session_id);
+				}
+			}
+			else if (peer_seq_nr < session->peer_seq) {
+				DOLOG(logger::ll_debug, "Peer resends packet for session %" PRIx64, session_id);
+
+				if (send_tcp_packet(shm, out_name,
+							a_to, a_from,  // swapped: reply
+							destination_port, source_port,  // swapped: reply
+							session->local_seq, session->peer_seq,
+							FLAG_ACK, session->window_size, { nullptr, 0 }) == false) {
+					clean_session = true;
+					DOLOG(logger::ll_debug, "Could not ACK data for session %" PRIx64, session_id);
+				}
+			}
+			else {
+				DOLOG(logger::ll_debug, "TCP out of order packet, expecting seq %u, got %u for session %" PRIx64, session->peer_seq, peer_seq_nr, session_id);
+			}
+		}
+		else {
+			DOLOG(logger::ll_debug, "Packet for an not known session");
+		}
 
 		if (invalid || clean_session) {
 			if (invalid && invalid_w_rst) {
@@ -479,9 +530,10 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 		}
 
 		enum { open, close } action = close;
-		std::optional<uint64_t> session_id;
-		std::optional<addr>     dst_addr;
-		std::optional<uint16_t> dst_port;
+		std::optional<uint64_t>    session_id;
+		std::optional<addr>        dst_addr;
+		std::optional<uint16_t>    dst_port;
+		std::optional<std::string> shm_data_address;
 
 		bool invalid = false;
 		for(auto & line: lines) {
@@ -513,6 +565,9 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 			else if (parts[0] == "dst-addr-ip4") {
 				dst_addr = addr(parts[1], ".", false);
 			}
+			else if (parts[0] == "shm-data-address") {
+				shm_data_address = parts[1];
+			}
 			else {
 				DOLOG(logger::ll_error, "TCP meta: invalid key \"%s\"", line.c_str());
 				invalid = true;
@@ -525,7 +580,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 		}
 
 		if (action == open) {
-			if (dst_port.has_value() && dst_addr.has_value()) {
+			if (dst_port.has_value() && dst_addr.has_value() && shm_data_address.has_value()) {
 				DOLOG(logger::ll_debug, "Opening TCP session to [%s]:%d",
 					dst_addr.value().to_str('.', false).c_str(), dst_port.value());
 				bool     failed   = false;
@@ -539,6 +594,8 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 					uint64_t session_id = calc_session_id(dst_port.value(), src_port, dst_addr.value(), from_addr);
 					session_t *new_session = new session_t;
 					new_session->is_client       = true;
+					memset(new_session->shm_peer, 0x00, max_id_length);
+					memcpy(new_session->shm_peer, shm_data_address.value().c_str(), shm_data_address.value().size());
 					new_session->state           = syn_sent;
 					my_random(&new_session->local_seq, sizeof new_session->local_seq);
 					new_session->start_local_seq = new_session->local_seq;
@@ -578,7 +635,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 				}
 			}
 			else {
-				DOLOG(logger::ll_error, "TCP meta: open-action missing either dst-port or dst-addr");
+				DOLOG(logger::ll_error, "TCP meta: open-action missing dst-port, dst-addr or shm-data-address");
 			}
 		}
 		else if (action == close) {

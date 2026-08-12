@@ -1,31 +1,71 @@
 #include <atomic>
 #include <cassert>
+#include <cinttypes>
 #include <thread>
 #include <unistd.h>
 
+#include "../utils/gen.h"
 #include "../utils/log.h"
 #include "../utils/shm.h"
 
+
+void emit(const std::string & channel, const shm_message_queue::message *const m)
+{
+	printf("channel: %s\n", channel.c_str());
+	printf("msg nr : %" PRIu64 "\n", m->msg_nr);
+	printf("type   : ");
+	if (m->type == shm_message_queue::msg_new)
+		printf("new\n");
+	else if (m->type == shm_message_queue::msg_reply)
+		printf("reply\n");
+	else if (m->type == shm_message_queue::msg_any)
+		printf("any\n");
+	else
+		printf("??? %d\n", m->type);
+	printf("length : %u\n", m->size);
+	printf("sender : %s\n", m->sender);
+	printf("content: %s\n", std::string(reinterpret_cast<const char *>(m->data), m->size).c_str());
+	printf("\n");
+}
 
 int main(int argc, char *argv[])
 {
 #if defined(NDEBUG)
 	printf("ASSERT IS DISABLED: NOT A DEBUG BUILD\n");
 #endif
-	constexpr const int         queue_size       = 16384;
-	constexpr const char *const local_identifier = "local-tcp";
+	constexpr const int         queue_size_meta       = 16384;
+	constexpr const char *const local_identifier_meta = "local-meta-tcp";
 
-	shm_message_queue q_a(local_identifier, queue_size);
-	bool rc = q_a.begin();
-	assert(rc);
+	shm_message_queue q_a(local_identifier_meta, queue_size_meta);
+	bool rc_a = q_a.begin();
+	assert(rc_a);
 
-	std::string open_req = "action=open\ndst-port=80\ndst-addr-ip4=94.142.246.159";
+	constexpr const int         queue_size_pl       = 16384;
+	constexpr const char *const local_identifier_pl = "local-pl-tcp";
+
+	shm_message_queue q_b(local_identifier_pl, queue_size_pl);
+	bool rc_b = q_b.begin();
+	assert(rc_b);
+
+	std::string open_req = "action=open\ndst-port=587\ndst-addr-ip4=94.142.246.159\nshm-data-address=local-pl-tcp";
         shm_message_queue::message *m_open_req = allocate_shm_message(open_req.size());
         m_open_req->type   = shm_message_queue::msg_new;
         memcpy(m_open_req->data, open_req.c_str(), m_open_req->size);
         bool rc_send = q_a.send_message(argv[1], m_open_req, true);
 	assert(rc_send);
         free(m_open_req);
+
+	for(;;) {
+		shm_message_queue::message *m_a = q_a.wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
+		if (m_a)
+			emit("meta", m_a);
+		free(m_a);
+
+		shm_message_queue::message *m_b = q_b.wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
+		if (m_b)
+			emit("pl", m_b);
+		free(m_b);
+	}
 
 	return 0;
 }
