@@ -267,12 +267,13 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						else {
 							session->state = established;
 							DOLOG(logger::ll_debug, "Received SYN/ACK for session %" PRIx64 ", sending ACK", session_id);
+							session->peer_seq = peer_seq_nr + 1;
 						}
 						// send ACK
 						if (send_tcp_packet(shm, out_name,
 								a_to, a_from,  // swapped: reply
 								destination_port, source_port,  // swapped: reply
-								0, 0,  // FIXME
+								session->local_seq, session->peer_seq + 1,  // FIXME
 								FLAG_ACK, 128 /* TODO */, { nullptr, 0 }) == false)
 						{
 							clean_session = true;
@@ -364,7 +365,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				send_tcp_packet(shm, out_name,
 						a_to, a_from,  // swapped: reply
 						destination_port, source_port,  // swapped: reply
-						0, peer_seq_nr + invalid_inc_ack,
+						session ? session->local_seq : 0, session ? peer_seq_nr + invalid_inc_ack : 0,
 						FLAG_RST, window_size, { nullptr, 0 });
 			}
 
@@ -503,14 +504,14 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 					session_t *new_session = new session_t;
 					new_session->is_client = true;
 					new_session->state     = syn_sent;
-					new_session->local_seq = 0;
+					my_random(&new_session->local_seq, sizeof new_session->local_seq);
 					new_session->peer_seq  = 0;
 
 					// send SYN
 					failed = !send_tcp_packet(shm, out_name,
 							from_addr, dst_addr.value(),
 							src_port, dst_port.value(),
-							0, 0,
+							new_session->local_seq, new_session->peer_seq,
 							FLAG_SYN, 128 /* TODO */, { nullptr, 0 });
 
 					// return new session_id
