@@ -267,7 +267,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						else {
 							session->state = established;
 							DOLOG(logger::ll_debug, "Received SYN/ACK for session %" PRIx64 ", sending ACK", session_id);
-							session->peer_seq = peer_seq_nr + 1;
+							session->peer_seq = peer_seq_nr;
 						}
 						// send ACK
 						if (send_tcp_packet(shm, out_name,
