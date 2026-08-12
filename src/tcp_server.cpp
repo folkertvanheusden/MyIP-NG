@@ -260,12 +260,13 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						DOLOG(logger::ll_debug, "Received SYN for session %" PRIx64 " (client)", session_id);
 						invalid = true;
 					}
-					else if (session->state == established) {
-						DOLOG(logger::ll_debug, "Received SYN/ACK for session %" PRIx64 " (client, established state)", session_id);
-					}
 					else {
-						session->state = established;
-						DOLOG(logger::ll_debug, "Received SYN/ACK for session %" PRIx64 ", sending ACK", session_id);
+						if (session->state == established)
+							DOLOG(logger::ll_debug, "Received SYN/ACK for session %" PRIx64 " (client, established state)", session_id);
+						else {
+							session->state = established;
+							DOLOG(logger::ll_debug, "Received SYN/ACK for session %" PRIx64 ", sending ACK", session_id);
+						}
 						// send ACK
 						if (send_tcp_packet(shm, out_name,
 								a_to, a_from,  // swapped: reply
