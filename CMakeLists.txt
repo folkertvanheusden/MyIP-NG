@@ -27,8 +27,8 @@ add_library(log
 add_library(misc
 	src/utils/checksum.cpp
 	src/utils/net.cpp
-	src/utils/stoi.cpp
 	src/utils/random.cpp
+	src/utils/stoi.cpp
 	src/utils/str.cpp
 	src/utils/time.cpp
 )

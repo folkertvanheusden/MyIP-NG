@@ -17,6 +17,7 @@ extern "C" {
 #include "utils/gen.h"
 #include "utils/log.h"
 #include "utils/net.h"
+#include "utils/random.h"
 #include "utils/shm.h"
 #include "utils/shm_message.h"
 #include "utils/stoi.h"
@@ -493,11 +494,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 				bool     failed   = false;
 				uint16_t src_port = 0;
 				do {
-					if (getrandom(&src_port, sizeof src_port, 0) == -1) {
-						failed = true;
-						DOLOG(logger::ll_error, "getrandom failed");
-						break;
-					}
+					my_random(&src_port, sizeof src_port);
 				}
 				while(local_allocated_ports.find(src_port) != local_allocated_ports.end());
 
@@ -762,10 +759,7 @@ int main(int argc, char *argv[])
 	std::mutex sessions_lock;
 
 	uint8_t syn_cookie_salt[16];  // key size required by SipHAsh
-	if (getrandom(syn_cookie_salt, sizeof syn_cookie_salt, 0) == -1) {
-		fprintf(stderr, "getrandom failed: %s\n", strerror(errno));
-		return 1;
-	}
+	my_random(syn_cookie_salt, sizeof syn_cookie_salt);
 
 	addr_ip4 send_addr = cfg_runtime(&shm_meta, ip4_meta_name);
 	if (stop_flag)
