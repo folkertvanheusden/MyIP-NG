@@ -221,7 +221,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		uint16_t source_port      = get_uint16(&pl[0]);
 		uint16_t destination_port = get_uint16(&pl[2]);
 		uint64_t session_id       = calc_session_id(source_port, destination_port, a_from, a_to);
-		int      header_size      = (pl[12] >> 4) * 4;  // or >> 2
+		int      header_size      = (pl[12] >> 4) * 4;
 		int      flags            =  pl[13];
 		int      window_size      = get_uint16(&pl[14]);
 		uint32_t peer_seq_nr      = get_uint32(&pl[ 4]);
