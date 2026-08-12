@@ -226,6 +226,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		int      window_size      = get_uint16(&pl[14]);
 		uint32_t peer_seq_nr      = get_uint32(&pl[ 4]);
 		uint32_t my_seq_nr        = get_uint32(&pl[ 8]);
+		int      tcp_pl_size      = pl_len - header_size;
 
 		if (header_size > pl_len) {
 			free(m);
@@ -233,9 +234,10 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			continue;
 		}
 
-		DOLOG(logger::ll_debug, "TCP packet from %d to %d, session id: %" PRIx64 ", flags: %s",
+		DOLOG(logger::ll_debug, "TCP packet from %d to %d, session id: %" PRIx64 ", flags: %s, pl size: %d",
 				source_port, destination_port, session_id,
-				flags_to_str(flags).c_str());
+				flags_to_str(flags).c_str(),
+				tcp_pl_size);
 
 		session_t *session = nullptr;
 		{
@@ -245,6 +247,13 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				session = it->second;
 				session->lock.lock();
 			}
+		}
+
+		if (session) {
+			DOLOG(logger::ll_debug, "TCP session %" PRIx64 ", local seq nr: %u, ack seq nr: %u",
+					session_id, session->local_seq, my_seq_nr);
+			DOLOG(logger::ll_debug, "TCP session %" PRIx64 ", expected peer seq nr: %u, recv peer seq nr: %u",
+					session_id, session->peer_seq, peer_seq_nr);
 		}
 
 		bool invalid         = false;
