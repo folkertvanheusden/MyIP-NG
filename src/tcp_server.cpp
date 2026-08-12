@@ -274,7 +274,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						if (send_tcp_packet(shm, out_name,
 								a_to, a_from,  // swapped: reply
 								destination_port, source_port,  // swapped: reply
-								session->local_seq, session->peer_seq + 1,
+								session->local_seq + 1, session->peer_seq + 1,
 								FLAG_ACK, session->window_size, { nullptr, 0 }) == false)
 						{
 							clean_session = true;
