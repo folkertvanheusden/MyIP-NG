@@ -47,7 +47,8 @@ int main(int argc, char *argv[])
 	bool rc_b = q_b.begin();
 	assert(rc_b);
 
-	std::string open_req = "action=open\ndst-port=587\ndst-addr-ip4=94.142.246.159\nshm-data-address=local-pl-tcp";
+//	std::string open_req = "action=open\ndst-port=25\ndst-addr-ip4=94.142.246.159\nshm-data-address=local-pl-tcp";
+	std::string open_req = "action=open\ndst-port=2500\ndst-addr-ip4=192.168.1.1\nshm-data-address=local-pl-tcp";
         shm_message_queue::message *m_open_req = allocate_shm_message(open_req.size());
         m_open_req->type   = shm_message_queue::msg_new;
         memcpy(m_open_req->data, open_req.c_str(), m_open_req->size);
@@ -55,16 +56,41 @@ int main(int argc, char *argv[])
 	assert(rc_send);
         free(m_open_req);
 
+	uint64_t session_id = 0;
+	int      i          = 0;
+
 	for(;;) {
 		shm_message_queue::message *m_a = q_a.wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
-		if (m_a)
+		if (m_a) {
 			emit("meta", m_a);
+
+			std::string msg(reinterpret_cast<const char *>(m_a->data), m_a->size);
+			if (msg.substr(0, 11) == "session-id=")
+				session_id = std::strtoull(msg.substr(11).c_str(), nullptr, 16);
+		}
 		free(m_a);
 
 		shm_message_queue::message *m_b = q_b.wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
 		if (m_b)
 			emit("pl", m_b);
 		free(m_b);
+
+		if (++i == 10) {
+			std::string msg = "Hello back!\n";
+			size_t       total_bytes  = 8 + msg.size();
+			uint8_t     *complete_msg = new uint8_t[total_bytes];
+			memcpy(&complete_msg[0], &session_id, sizeof session_id);
+			memcpy(&complete_msg[8], msg.c_str(), msg.size());
+
+			shm_message_queue::message *m_msg = allocate_shm_message(total_bytes);
+			m_msg->type   = shm_message_queue::msg_new;
+			memcpy(m_msg->data, complete_msg, total_bytes);
+			bool rc_send = q_b.send_message(argv[2], m_msg, true);
+			assert(rc_send);
+			free(m_msg);
+
+			delete [] complete_msg;
+		}
 	}
 
 	return 0;
