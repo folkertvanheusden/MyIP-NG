@@ -262,7 +262,6 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					}
 					else if (session->state == established) {
 						DOLOG(logger::ll_debug, "Received SYN/ACK for session %" PRIx64 " (client, established state)", session_id);
-						invalid = true;
 					}
 					else {
 						session->state = established;
