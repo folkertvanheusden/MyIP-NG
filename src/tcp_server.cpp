@@ -397,7 +397,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			DOLOG(logger::ll_debug, "Session %" PRIx64 " has an unexpected state", session_id);
 		}
 
-		// TODO
+		// send data to other end (local shm peer)
 		if (session != nullptr && tcp_pl_size > 0) {  // TODO check sequence numbers
 			if (peer_seq_nr == session->peer_seq) {
 				shm_message_queue::message *m_session = allocate_shm_message(tcp_pl_size + 8);
@@ -425,6 +425,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				}
 				else {
 					DOLOG(logger::ll_debug, "Cannot send to peer shm, session %" PRIx64, session_id);
+					// do nothing, tcp-peer should retry eventually
 				}
 			}
 			else if (peer_seq_nr < session->peer_seq) {
