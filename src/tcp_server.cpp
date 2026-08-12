@@ -507,7 +507,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 					new_session->state       = syn_sent;
 					my_random(&new_session->local_seq, sizeof new_session->local_seq);
 					new_session->peer_seq    = 0;
-					new_session->window_size = 1;  // TODO make bigger eventually
+					new_session->window_size = 512;
 
 					// send SYN
 					failed = !send_tcp_packet(shm, out_name,
