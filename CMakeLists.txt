@@ -10,7 +10,7 @@ add_definitions("-D_FILE_OFFSET_BITS=64")
 #set(CMAKE_BUILD_TYPE RelWithDebInfo)
 set(CMAKE_BUILD_TYPE Debug)
 
-add_compile_options(-Wall -pedantic)
+add_compile_options(-Wall)
 
 #add_compile_options(-fsanitize=address,undefined)
 #add_link_options(-fsanitize=address,undefined)
