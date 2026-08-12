@@ -38,6 +38,8 @@ enum tcp_state_t { listen, syn_sent, syn_received, established, fin_wait_1, fin_
 struct session_t {
 	bool        is_client;
 	tcp_state_t state;
+	uint32_t    start_local_seq;
+	uint32_t    start_peer_seq;
 	uint32_t    local_seq;
 	uint32_t    peer_seq;
 	uint16_t    window_size;
@@ -50,6 +52,28 @@ struct session_t {
 };
 
 std::atomic_bool stop_flag { false };
+
+std::string seq_delta_lcl(const session_t *const s, const std::optional<uint32_t> & current = { })
+{
+	uint32_t use = current.has_value() ? current.value() : s->local_seq;
+
+	// this will fail after 2^32 bytes
+	if (use < s->start_local_seq)
+		return std::format("{}", UINT32_MAX - s->start_local_seq + use);
+
+	return std::format("{}", use - s->start_local_seq);
+}
+
+std::string seq_delta_peer(const session_t *const s, const std::optional<uint32_t> & current = { })
+{
+	uint32_t use = current.has_value() ? current.value() : s->peer_seq;
+
+	// this will fail after 2^32 bytes
+	if (use < s->start_peer_seq)
+		return std::format("{}", UINT32_MAX - s->start_peer_seq + use);
+
+	return std::format("{}", use - s->start_peer_seq);
+}
 
 void sig_handler(int sig)
 {
@@ -250,10 +274,10 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		}
 
 		if (session) {
-			DOLOG(logger::ll_debug, "TCP session %" PRIx64 ", local seq nr: %u, ack seq nr: %u",
-					session_id, session->local_seq, my_seq_nr);
-			DOLOG(logger::ll_debug, "TCP session %" PRIx64 ", expected peer seq nr: %u, recv peer seq nr: %u",
-					session_id, session->peer_seq, peer_seq_nr);
+			DOLOG(logger::ll_debug, "TCP session %" PRIx64 ", local seq nr: %s, ack seq nr: %s",
+					session_id, seq_delta_lcl(session).c_str(), seq_delta_lcl(session, my_seq_nr).c_str());
+			DOLOG(logger::ll_debug, "TCP session %" PRIx64 ", expected peer seq nr: %s, recv peer seq nr: %s",
+					session_id, seq_delta_peer(session).c_str(), seq_delta_peer(session, peer_seq_nr).c_str());
 		}
 
 		bool invalid         = false;
@@ -277,9 +301,10 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						else {
 							session->state = established;
 							DOLOG(logger::ll_debug, "Received SYN/ACK for session %" PRIx64 ", sending ACK", session_id);
-							session->peer_seq = peer_seq_nr;
+							session->start_peer_seq = session->peer_seq = peer_seq_nr;
 						}
 						// send ACK
+						DOLOG(logger::ll_debug, "TCP session %" PRIx64 ", local: %u, ack: %u", session->local_seq + 1, session->peer_seq + 1);
 						if (send_tcp_packet(shm, out_name,
 								a_to, a_from,  // swapped: reply
 								destination_port, source_port,  // swapped: reply
@@ -512,11 +537,13 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 				if (failed == false) {
 					uint64_t session_id = calc_session_id(dst_port.value(), src_port, dst_addr.value(), from_addr);
 					session_t *new_session = new session_t;
-					new_session->is_client   = true;
-					new_session->state       = syn_sent;
+					new_session->is_client       = true;
+					new_session->state           = syn_sent;
 					my_random(&new_session->local_seq, sizeof new_session->local_seq);
-					new_session->peer_seq    = 0;
-					new_session->window_size = 512;
+					new_session->start_local_seq = new_session->local_seq;
+					new_session->peer_seq        = 0;
+					new_session->start_peer_seq  = 0;
+					new_session->window_size     = 512;
 
 					// send SYN
 					failed = !send_tcp_packet(shm, out_name,
