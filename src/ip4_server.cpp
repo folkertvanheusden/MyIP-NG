@@ -436,7 +436,6 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 					size_t fragment_offset = 0;
 					while(fragment_offset < pl_len) {
 						size_t   current_fragment_size = std::min(size_t(use_mtu_size), pl_len - fragment_offset);
-						printf("%zu %zu: %zu\n", fragment_offset, pl_len, current_fragment_size);
 						size_t   complete_msg_size = current_fragment_size + 20;  // 20 = IP4 header size
 						uint8_t *complete_msg      = new uint8_t[complete_msg_size]();
 						uint8_t *header            = complete_msg;
