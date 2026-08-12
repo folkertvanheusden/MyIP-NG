@@ -40,6 +40,7 @@ struct session_t {
 	tcp_state_t state;
 	uint32_t    local_seq;
 	uint32_t    peer_seq;
+	uint16_t    window_size;
 	std::mutex  lock;
 
 	addr        local_addr;
@@ -273,8 +274,8 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						if (send_tcp_packet(shm, out_name,
 								a_to, a_from,  // swapped: reply
 								destination_port, source_port,  // swapped: reply
-								session->local_seq, session->peer_seq + 1,  // FIXME
-								FLAG_ACK, 128 /* TODO */, { nullptr, 0 }) == false)
+								session->local_seq, session->peer_seq + 1,
+								FLAG_ACK, session->window_size, { nullptr, 0 }) == false)
 						{
 							clean_session = true;
 							DOLOG(logger::ll_debug, "Could not send ACK for client session %" PRIx64, session_id);
@@ -502,17 +503,18 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 				if (failed == false) {
 					uint64_t session_id = calc_session_id(dst_port.value(), src_port, dst_addr.value(), from_addr);
 					session_t *new_session = new session_t;
-					new_session->is_client = true;
-					new_session->state     = syn_sent;
+					new_session->is_client   = true;
+					new_session->state       = syn_sent;
 					my_random(&new_session->local_seq, sizeof new_session->local_seq);
-					new_session->peer_seq  = 0;
+					new_session->peer_seq    = 0;
+					new_session->window_size = 1;  // TODO make bigger eventually
 
 					// send SYN
 					failed = !send_tcp_packet(shm, out_name,
 							from_addr, dst_addr.value(),
 							src_port, dst_port.value(),
 							new_session->local_seq, new_session->peer_seq,
-							FLAG_SYN, 128 /* TODO */, { nullptr, 0 });
+							FLAG_SYN, new_session->window_size, { nullptr, 0 });
 
 					// return new session_id
 					if (!failed) {
@@ -559,7 +561,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 							session->local_addr, session->peer_addr,
 							session->local_port, session->peer_port,
 							session->local_seq,  session->peer_seq + 1,
-							FLAG_FIN, 128 /* TODO */, { nullptr, 0 });
+							FLAG_FIN, session->window_size, { nullptr, 0 });
 					sessions->erase(it);
 				}
 				else {
