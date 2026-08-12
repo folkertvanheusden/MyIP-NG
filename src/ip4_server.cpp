@@ -17,6 +17,7 @@
 #include "utils/gen.h"
 #include "utils/log.h"
 #include "utils/net.h"
+#include "utils/random.h"
 #include "utils/shm.h"
 #include "utils/shm_message.h"
 #include "utils/str.h"
@@ -429,8 +430,7 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 				else {
 					// & ~7: make sure we stay on a multiple of 8 for the offset
 					uint16_t packets_id = 0;
-					if (getrandom(&packets_id, sizeof packets_id, 0) == -1)
-						DOLOG(logger::ll_error, "getrandom failed for IP packet id!");
+					my_random(&packets_id, sizeof packets_id);
 					const int use_mtu_size = mtu_size & ~7;
 					size_t fragment_offset = 0;
 					while(fragment_offset < pl_len) {
