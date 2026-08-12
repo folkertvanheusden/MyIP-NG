@@ -266,6 +266,17 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					}
 					else {
 						session->state = established;
+						DOLOG(logger::ll_debug, "Received SYN/ACK for session %" PRIx64 ", sending ACK", session_id);
+						// send ACK
+						if (send_tcp_packet(shm, out_name,
+								a_to, a_from,  // swapped: reply
+								destination_port, source_port,  // swapped: reply
+								0, 0,  // FIXME
+								FLAG_ACK, 128 /* TODO */, { nullptr, 0 }) == false)
+						{
+							clean_session = true;
+							DOLOG(logger::ll_debug, "Could not send ACK for client session %" PRIx64, session_id);
+						}
 					}
 				}
 				else {
@@ -491,7 +502,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 				while(local_allocated_ports.find(src_port) != local_allocated_ports.end());
 
 				if (failed == false) {
-					uint64_t session_id = calc_session_id(src_port, dst_port.value(), from_addr, dst_addr.value());
+					uint64_t session_id = calc_session_id(dst_port.value(), src_port, dst_addr.value(), from_addr);
 					session_t *new_session = new session_t;
 					new_session->is_client = true;
 					new_session->state     = syn_sent;
