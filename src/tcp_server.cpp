@@ -482,6 +482,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 	}
 }
 
+// tcp -> ip
 void run_out(shm_message_queue *const shm, const std::string & out_name, shm_message_queue *const shm_out,
 	    std::map<uint64_t, session_t *> *const sessions, std::mutex & sessions_lock)
 {
@@ -571,6 +572,8 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 		// unwrap
 		uint64_t session_id = 0;
 		memcpy(&session_id, m->data, 8);
+
+		DOLOG(logger::ll_debug, "TCP outbound for %" PRIx64 " received", session_id);
 
 		// TODO max size & session time out
 
