@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include <iniparser/iniparser.h>
 
+#include "common.h"
 #include "utils/addresses.h"
 #include "utils/gen.h"
 #include "utils/log.h"
@@ -190,13 +191,13 @@ int main(int argc, char *argv[])
 
 	signal(SIGINT, sig_handler);
 
-	shm_message_queue shm(name, msg_queue_size);
-	if (shm.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", name.c_str());
+	shm_message_queue *shm = create_shm(name, msg_queue_size);
+	if (shm == nullptr)
 		return 1;
-	}
 
-	run(&shm, out_name);
+	run(shm, out_name);
+
+	delete shm;
 
 	return 0;
 }

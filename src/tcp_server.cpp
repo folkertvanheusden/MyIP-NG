@@ -13,6 +13,7 @@
 extern "C" {
 #include "3dparty/SipHash/siphash.h"
 }
+#include "common.h"
 #include "utils/addresses.h"
 #include "utils/checksum.h"
 #include "utils/gen.h"
@@ -943,23 +944,17 @@ int main(int argc, char *argv[])
 
 	signal(SIGINT, sig_handler);
 
-	shm_message_queue shm(name, msg_queue_size);
-	if (shm.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", name.c_str());
+	shm_message_queue *shm = create_shm(name, msg_queue_size);
+	if (shm == nullptr)
 		return 1;
-	}
 
-	shm_message_queue shm_upper(name_upper, msg_queue_size);
-	if (shm_upper.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", name_upper.c_str());
+	shm_message_queue *shm_upper = create_shm(name_upper, msg_queue_size);
+	if (shm_upper == nullptr)
 		return 1;
-	}
 
-	shm_message_queue shm_meta(name_meta, msg_queue_size_meta);
-	if (shm_meta.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", name_meta.c_str());
+	shm_message_queue *shm_meta = create_shm(name_meta, msg_queue_size_meta);
+	if (shm_meta == nullptr)
 		return 1;
-	}
 
 	std::map<uint64_t, session_t *> sessions;
 	std::mutex sessions_lock;
@@ -967,11 +962,15 @@ int main(int argc, char *argv[])
 	uint8_t syn_cookie_salt[16];  // key size required by SipHAsh
 	my_random(syn_cookie_salt, sizeof syn_cookie_salt);
 
-	addr_ip4 send_addr = cfg_runtime(&shm_meta, ip4_meta_name);
+	addr_ip4 send_addr = cfg_runtime(shm_meta, ip4_meta_name);
 	if (stop_flag)
 		return 1;
 
-	run(&shm, out_name, mappings_in, &shm_upper, icmp_error_name, &sessions, sessions_lock, syn_cookie_salt, &shm_meta, send_addr);
+	run(shm, out_name, mappings_in, shm_upper, icmp_error_name, &sessions, sessions_lock, syn_cookie_salt, shm_meta, send_addr);
+
+	delete shm_meta;
+	delete shm_upper;
+	delete shm;
 
 	return 0;
 }
