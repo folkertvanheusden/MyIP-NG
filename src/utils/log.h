@@ -36,3 +36,5 @@ extern logger log_;
         if (ll >= log_.get_loglevel())  \
                 log_.dolog(ll, __FILE__, __builtin_extract_return_addr(__builtin_return_address(0)), __FUNCTION__, fmt, ##__VA_ARGS__);   \
         } while(0)
+
+void set_thread_name(std::string name);

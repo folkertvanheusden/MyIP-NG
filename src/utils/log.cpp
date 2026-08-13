@@ -8,6 +8,7 @@
 #include <iostream>
 #include <ostream>
 #include <sstream>
+#include <thread>
 
 #include "log.h"
 #include "time.h"
@@ -76,3 +77,15 @@ void logger::dolog(const logger::loglevel_t ll, const char *const file, const vo
 }
 
 logger log_;
+
+void set_thread_name(std::string name)
+{
+	if (name.length() > 15)
+		name = name.substr(0, 15);
+
+#if defined(__APPLE__)
+	pthread_setname_np(name.c_str());
+#else
+	pthread_setname_np(pthread_self(), name.c_str());
+#endif
+}
