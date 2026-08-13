@@ -541,6 +541,8 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 					n++;
 				}
 
+				session->lock.unlock();
+
 				if (n)
 					DOLOG(logger::ll_debug, "TCP sent %d item(s) for session %" PRIx64, n, target.first);
 
