@@ -76,6 +76,8 @@ int main(int argc, char *argv[])
 		free(m_b);
 
 		if (++i == 10) {
+			printf("-> send 2nd message\n\n");
+
 			std::string msg = "Hello back!\n";
 			size_t       total_bytes  = 8 + msg.size();
 			uint8_t     *complete_msg = new uint8_t[total_bytes];
