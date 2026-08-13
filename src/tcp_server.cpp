@@ -800,31 +800,6 @@ void run(shm_message_queue *const shm, const std::string & out_name,
 	rx  .join();
 }
 
-void load_mappings(std::map<uint16_t, std::string> *const mappings_in, const dictionary *const d)
-{
-	constexpr const char section_name[] = "mappings";
-	int n_keys = iniparser_getsecnkeys(d, section_name);
-	if (n_keys == 0)
-		return;
-	const char **keys = new const char *[n_keys]();
-	iniparser_getseckeys(d, section_name, keys);
-
-	for(int i=0; i<n_keys; i++) {
-		const char *col = strchr(keys[i], ':');  // unless inilib is broken
-		const char *v   = iniparser_getstring(d, keys[i], "");
-		if (strlen(v) == 0) {
-			fprintf(stderr, "Mapping \"%s\" is invalid\n", keys[i]);
-			exit(1);
-		}
-		auto k = my_stoi_dec(col + 1);
-		if (k.has_value() == false)
-			exit(1);
-		mappings_in->insert({ k.value(), v });
-	}
-
-	delete [] keys;
-}
-
 std::optional<uint64_t> send_meta_request(shm_message_queue *const shm_meta, const std::string & peer_name, const std::string & request)
 {
         shm_message_queue::message *meta_request_msg = allocate_shm_message(request.size());
@@ -939,7 +914,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Using default msg queue size of %d bytes\n", msg_queue_size);
 	}
 	std::map<uint16_t, std::string> mappings_in;
-	load_mappings(&mappings_in, d);
+	load_mappings_single(&mappings_in, d);
 	iniparser_freedict(d);
 
 	signal(SIGINT, sig_handler);
