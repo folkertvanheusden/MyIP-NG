@@ -8,7 +8,7 @@
 class logger
 {
 public:
-	enum loglevel_t { ll_debug, ll_info, ll_warning, ll_error, ll_fatal };
+	enum loglevel_t { ll_trace, ll_debug, ll_info, ll_warning, ll_error, ll_fatal };
 
 private:
 	loglevel_t  ll       { ll_debug      };
