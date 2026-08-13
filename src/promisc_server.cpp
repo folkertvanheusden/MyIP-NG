@@ -109,30 +109,6 @@ std::optional<prom_handle> open_promiscuous_dev(const std::string & device_name)
 	return ph;
 }
 
-void load_mappings(std::map<uint16_t, std::string> *const mappings_in, std::map<std::string, uint16_t> *const mappings_out, const dictionary *const d)
-{
-	constexpr const char section_name[] = "mappings";
-	int n_keys = iniparser_getsecnkeys(d, section_name);
-	if (n_keys == 0)
-		return;
-	const char **keys = new const char *[n_keys]();
-	iniparser_getseckeys(d, section_name, keys);
-
-	for(int i=0; i<n_keys; i++) {
-		const char *col = strchr(keys[i], ':');  // unless inilib is broken
-		const char *v   = iniparser_getstring(d, keys[i], "");
-		if (strlen(v) == 0) {
-			fprintf(stderr, "Mapping \"%s\" is invalid\n", keys[i]);
-			exit(1);
-		}
-		uint16_t    k   = std::stoi(col + 1, nullptr, 16);
-		mappings_in ->insert({ k, v });
-		mappings_out->insert({ v, k });
-	}
-
-	delete [] keys;
-}
-
 void run_in(shm_message_queue *const shm, const prom_handle & ph, const std::map<uint16_t, std::string> & mappings_in)
 {
 	pollfd  fds[]       = { { ph.fd, POLLIN, 0 } };
@@ -375,7 +351,7 @@ int main(int argc, char *argv[])
         }
 	std::map<uint16_t, std::string> mappings_in;
 	std::map<std::string, uint16_t> mappings_out;
-	load_mappings(&mappings_in, &mappings_out, d);
+	load_mappings_duo(&mappings_in, &mappings_out, d);
 	iniparser_freedict(d);
 
 	signal(SIGINT, sig_handler);

@@ -116,30 +116,6 @@ bool get_local_mac(const std::string & device_name, uint8_t mac_addr[6])
 	return true;
 }
 
-void load_mappings(std::map<uint16_t, std::string> *const mappings_in, std::map<std::string, uint16_t> *const mappings_out, const dictionary *const d)
-{
-	constexpr const char section_name[] = "mappings";
-	int n_keys = iniparser_getsecnkeys(d, section_name);
-	if (n_keys == 0)
-		return;
-	const char **keys = new const char *[n_keys]();
-	iniparser_getseckeys(d, section_name, keys);
-
-	for(int i=0; i<n_keys; i++) {
-		const char *col = strchr(keys[i], ':');  // unless inilib is broken
-		const char *v   = iniparser_getstring(d, keys[i], "");
-		if (strlen(v) == 0) {
-			fprintf(stderr, "Mapping \"%s\" is invalid\n", keys[i]);
-			exit(1);
-		}
-		uint16_t    k   = std::stoi(col + 1, nullptr, 16);
-		mappings_in ->insert({ k, v });
-		mappings_out->insert({ v, k });
-	}
-
-	delete [] keys;
-}
-
 void push_meta_reply(shm_message_queue *const shm_meta, const std::string & to, const std::string & reply, const uint64_t msg_nr)
 {
 	DOLOG(logger::ll_debug, "Pushing reply \"%s\" to \"%s\" (id: %" PRIu64 ")", reply.c_str(), to.c_str(), msg_nr);
@@ -377,7 +353,7 @@ int main(int argc, char *argv[])
         }
 	std::map<uint16_t, std::string> mappings_in;
 	std::map<std::string, uint16_t> mappings_out;
-	load_mappings(&mappings_in, &mappings_out, d);
+	load_mappings_duo(&mappings_in, &mappings_out, d);
 	iniparser_freedict(d);
 
 	signal(SIGINT, sig_handler);
