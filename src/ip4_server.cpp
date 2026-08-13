@@ -12,6 +12,7 @@
 #include <iniparser/iniparser.h>
 #include <sys/random.h>
 
+#include "common.h"
 #include "utils/addresses.h"
 #include "utils/checksum.h"
 #include "utils/gen.h"
@@ -265,6 +266,8 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 			}
 
 			if (wrapped) {
+				DOLOG(logger::ll_trace, "ETH->IP: %s", dump(&pl[header_size], pl_without_header_len).c_str());
+
 				if (shm->send_message(it->second, wrapped, false) == false)
 					DOLOG(logger::ll_warning, "Cannot send to %s", it->second.c_str());
 
@@ -456,6 +459,8 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 						memcpy(&header[16], to,   4);
 						memcpy(&complete_msg[20], &pl[fragment_offset], current_fragment_size);
 
+						DOLOG(logger::ll_trace, "IP->ETH: %s", dump(&pl[fragment_offset], current_fragment_size).c_str());
+
 						// 20 = IP4 header size
 						uint16_t checksum = ip_checksum(reinterpret_cast<const uint16_t *>(&header[0]), 20);
 						header[10] = checksum >> 8;
@@ -643,6 +648,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
+	log_.set_loglevel(logger::ll_trace);  // TODO configurable
 	DOLOG(logger::ll_info, "IP4 server starting...");
 
 	dictionary *d = iniparser_load(cfg_file.c_str());
@@ -720,34 +726,31 @@ int main(int argc, char *argv[])
 
 	signal(SIGINT, sig_handler);
 
-	shm_message_queue shm(lower_in_name, msg_queue_size);
-	if (shm.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", lower_in_name.c_str());
+	shm_message_queue *shm = create_shm(lower_in_name, msg_queue_size);
+	if (shm == nullptr)
 		return 1;
-	}
 
-	shm_message_queue shm_resolver_replies(resolver_replies, msg_queue_size_resolver);
-	if (shm_resolver_replies.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", resolver_replies.c_str());
+	shm_message_queue *shm_resolver_replies = create_shm(resolver_replies, msg_queue_size_resolver);
+	if (shm_resolver_replies == nullptr)
 		return 1;
-	}
 
-	shm_message_queue shm_upper_in(upper_in_name, msg_queue_size);
-	if (shm_upper_in.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", upper_in_name.c_str());
+	shm_message_queue *shm_upper_in = create_shm(upper_in_name, msg_queue_size);
+	if (shm_upper_in == nullptr)
 		return 1;
-	}
 
-	shm_message_queue shm_meta(meta_name, META_SHM_SIZE);
-	if (shm_meta.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", meta_name.c_str());
+	shm_message_queue *shm_meta = create_shm(meta_name, META_SHM_SIZE);
+	if (shm_meta == nullptr)
 		return 1;
-	}
 
-	run(&shm, { listen_addr, cidr }, default_gw_addr, mappings_in, mappings_out,
-            icmp_error_name, out_name, &shm_resolver_replies, resolver_name, &shm_upper_in,
+	run(shm, { listen_addr, cidr }, default_gw_addr, mappings_in, mappings_out,
+            icmp_error_name, out_name, shm_resolver_replies, resolver_name, shm_upper_in,
 	    mtu_size,
-	    &shm_meta);
+	    shm_meta);
+
+	delete shm_meta;
+	delete shm_upper_in;
+	delete shm_resolver_replies;
+	delete shm;
 
 	return 0;
 }

@@ -54,30 +54,37 @@ add_executable(arp_test
 	)
 
 add_executable(tap_server
+	src/common.cpp
 	src/tap_server.cpp
 	)
 
 add_executable(promiscuous_server
+	src/common.cpp
 	src/promisc_server.cpp
 	)
 
 add_executable(arp_server
 	src/arp_server.cpp
+	src/common.cpp
 	)
 
 add_executable(ip4_server
+	src/common.cpp
 	src/ip4_server.cpp
 	)
 
 add_executable(icmp_server
+	src/common.cpp
 	src/icmp_server.cpp
 	)
 
 add_executable(udp_server
+	src/common.cpp
 	src/udp_server.cpp
 	)
 
 add_executable(ntp_server
+	src/common.cpp
 	src/ntp_server.cpp
 	)
 

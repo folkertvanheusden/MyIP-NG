@@ -5,6 +5,7 @@
 #include <thread>
 #include <iniparser/iniparser.h>
 
+#include "common.h"
 #include "utils/addresses.h"
 #include "utils/checksum.h"
 #include "utils/gen.h"
@@ -229,19 +230,18 @@ int main(int argc, char *argv[])
 
 	signal(SIGINT, sig_handler);
 
-	shm_message_queue shm(name, msg_queue_size);
-	if (shm.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", name.c_str());
+	shm_message_queue *shm = create_shm(name, msg_queue_size);
+	if (shm == nullptr)
 		return 1;
-	}
 
-	shm_message_queue shm_error(error_in_name, msg_queue_size);
-	if (shm_error.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", error_in_name.c_str());
+	shm_message_queue *shm_error = create_shm(error_in_name, msg_queue_size);
+	if (shm_error == nullptr)
 		return 1;
-	}
 
-	run(&shm, out_name, &shm_error);
+	run(shm, out_name, shm_error);
+
+	delete shm_error;
+	delete shm;
 
 	return 0;
 }

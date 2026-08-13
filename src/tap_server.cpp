@@ -17,6 +17,7 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 
+#include "common.h"
 #include "utils/addresses.h"
 #include "utils/gen.h"
 #include "utils/log.h"
@@ -402,19 +403,18 @@ int main(int argc, char *argv[])
 
 	DOLOG(logger::ll_info, "TAP server starting...");
 
-	shm_message_queue shm(name, msg_queue_size);
-	if (shm.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment\n");
+	shm_message_queue *shm = create_shm(name, msg_queue_size);
+	if (shm == nullptr)
 		return 1;
-	}
 
-	shm_message_queue shm_meta(meta_name, META_SHM_SIZE);
-	if (shm_meta.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment \"%s\"\n", meta_name.c_str());
+	shm_message_queue *shm_meta = create_shm(meta_name, META_SHM_SIZE);
+	if (shm_meta == nullptr)
 		return 1;
-	}
 
-	run(&shm, tap_fd, mac_addr, mappings_in, mappings_out, &shm_meta);
+	run(shm, tap_fd, mac_addr, mappings_in, mappings_out, shm_meta);
+
+	delete shm_meta;
+	delete shm;
 
 	return 0;
 }

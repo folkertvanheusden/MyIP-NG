@@ -9,6 +9,7 @@
 #include <thread>
 #include <iniparser/iniparser.h>
 
+#include "common.h"
 #include "utils/addresses.h"
 #include "utils/gen.h"
 #include "utils/log.h"
@@ -446,32 +447,30 @@ int main(int argc, char *argv[])
 
 	signal(SIGINT, sig_handler);
 
-	shm_message_queue shm(name, msg_queue_size);
-	if (shm.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment\n");
+	shm_message_queue *shm = create_shm(name, msg_queue_size);
+	if (shm == nullptr)
 		return 1;
-	}
 
-	shm_message_queue shm_resolver(resolver_name, msg_queue_size_resolver);
-	if (shm_resolver.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment for resolver channel\n");
+	shm_message_queue *shm_resolver = create_shm(resolver_name, msg_queue_size_resolver);
+	if (shm_resolver == nullptr)
 		return 1;
-	}
 
-	shm_message_queue shm_meta(meta_name, META_SHM_SIZE);
-	if (shm_meta.begin() == false) {
-		fprintf(stderr, "Cannot initialize shared memory segment for meta channel\n");
+	shm_message_queue *shm_meta = create_shm(meta_name, META_SHM_SIZE);
+	if (shm_meta == nullptr)
 		return 1;
-	}
 
-	auto     addresses = cfg_runtime(&shm_meta, ether_meta_name, ip4_meta_name);
+	auto     addresses = cfg_runtime(shm_meta, ether_meta_name, ip4_meta_name);
 	addr_mac mac_addr  = addresses.first;
 	addr_ip4 ip4_addr  = addresses.second;
+	delete shm_meta;
 
 	std::map<addr_ip4, addr_mac, addr> cache;
 	std::mutex cache_lock;
 
-	run(&shm, mac_addr, ip4_addr, &requests, requests_lock, &shm_resolver, out_name, &cache, cache_lock);
+	run(shm, mac_addr, ip4_addr, &requests, requests_lock, shm_resolver, out_name, &cache, cache_lock);
+
+	delete shm_resolver;
+	delete shm;
 
 	return 0;
 }
