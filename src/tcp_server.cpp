@@ -210,6 +210,8 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 	    std::map<uint64_t, session_t *> *const sessions, std::mutex & sessions_lock,
 	    const uint8_t syn_cookie_salt[16])
 {
+	set_thread_name("run_in");
+
 	while(!stop_flag) {
 		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
 		if (!m)
@@ -483,11 +485,14 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 void run_out(shm_message_queue *const shm, const std::string & out_name, shm_message_queue *const shm_out,
 	    std::map<uint64_t, session_t *> *const sessions, std::mutex & sessions_lock)
 {
+	set_thread_name("run_out");
+
 	std::map<uint64_t, std::vector<shm_message_queue::message *> > payloads;
 	std::mutex              payload_lock;
 	std::condition_variable payload_cv;
 
 	std::thread sender([&] {
+		set_thread_name("run_out::sender");
 		std::unique_lock<std::mutex> lck(payload_lock);
 
 		while(!stop_flag) {
@@ -585,6 +590,8 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 	      shm_message_queue *const shm_meta,
 	      std::map<uint64_t, session_t *> *const sessions, std::mutex & sessions_lock)
 {
+	set_thread_name("run_meta");
+
 	// map of local port and session-id
 	// should also include addr in key
 	std::map<uint16_t, uint64_t> local_allocated_ports;
