@@ -527,6 +527,8 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 					int  pl_size = item->size - 8;
 
 					// TODO handle peer window size
+
+					DOLOG(logger::ll_debug, "TCP sent packet to %s for session %" PRIx64, out_name.c_str(), target.first);
 					if (send_tcp_packet(shm_out, out_name,
 								session->local_addr, session->peer_addr,
 								session->local_port, session->peer_port,
