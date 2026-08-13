@@ -212,6 +212,8 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 {
 	set_thread_name("run_in");
 
+        DOLOG(logger::ll_debug, "waiting for packets (IP->TCP) on shm %s", shm->get_local_identifier().c_str());
+
 	while(!stop_flag) {
 		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
 		if (!m)
@@ -487,6 +489,9 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 	    std::map<uint64_t, session_t *> *const sessions, std::mutex & sessions_lock)
 {
 	set_thread_name("run_out");
+
+        DOLOG(logger::ll_debug, "waiting for packets (client->TCP) on shm %s", shm->get_local_identifier().c_str());
+        DOLOG(logger::ll_debug, "sending packets to %s (TCP->IP) via shm-name %s", out_name.c_str(), shm_out->get_local_identifier().c_str());
 
 	std::map<uint64_t, std::vector<shm_message_queue::message *> > payloads;
 	std::mutex              payload_lock;
