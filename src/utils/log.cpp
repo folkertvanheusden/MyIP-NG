@@ -37,6 +37,7 @@ void logger::dolog(const logger::loglevel_t ll, const char *const file, const vo
 	char *log_buffer = nullptr;
 
 	constexpr const char *const ll_str[] {
+			"TRC",
 			"DBG",
 			"INF",
 			"WRN",
