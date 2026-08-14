@@ -45,8 +45,8 @@ struct session_t {
 	uint32_t    start_local_seq;
 	uint32_t    start_peer_seq;
 	uint32_t    local_seq;
-	uint16_t    local_window_size;
 	uint32_t    peer_seq;
+	uint16_t    local_window_size;
 	uint16_t    peer_window_size;
 
 	addr        local_addr;
@@ -526,6 +526,11 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 					forget.push_back(target.first);
 					continue;
 				}
+
+				if (session)
+					DOLOG(logger::ll_debug, "TCP session %" PRIx64 ", local seq nr: %s",
+							target.first, seq_delta_lcl(session).c_str());
+
 
 				int n = 0;
 				while(target.second.empty() == false) {
