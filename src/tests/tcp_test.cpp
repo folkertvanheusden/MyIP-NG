@@ -33,6 +33,11 @@ int main(int argc, char *argv[])
 #if defined(NDEBUG)
 	printf("ASSERT IS DISABLED: NOT A DEBUG BUILD\n");
 #endif
+	if (argc != 3) {
+		fprintf(stderr, "%s tcp-meta tcp-upper\n", argv[0]);
+		return 1;
+	}
+
 	constexpr const int         queue_size_meta       = 16384;
 	constexpr const char *const local_identifier_meta = "local-meta-tcp";
 
