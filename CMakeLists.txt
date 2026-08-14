@@ -37,6 +37,10 @@ add_executable(shm_test
 	src/tests/shm_test.cpp
 	)
 
+add_executable(shm_measure
+	src/tests/shm_measure.cpp
+	)
+
 add_executable(shm_dump
 	src/tests/shm_dump.cpp
 	)
@@ -111,8 +115,9 @@ target_link_libraries(icmp_server shm log misc)
 target_link_libraries(ip4_server shm log misc)
 target_link_libraries(ntp_server shm log misc)
 target_link_libraries(promiscuous_server shm log misc)
-target_link_libraries(shm_test shm log)
+target_link_libraries(shm_measure shm log)
 target_link_libraries(shm_message_test shm log)
+target_link_libraries(shm_test shm log)
 target_link_libraries(tap_server shm log misc)
 target_link_libraries(tcp_server shm log misc)
 target_link_libraries(tcp_test shm log)
