@@ -405,7 +405,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		}
 
 		// send data to other end (local shm peer)
-		if (session != nullptr) {  // TODO check sequence numbers
+		if (session != nullptr) {
 			if (peer_seq_nr == session->peer_seq) {
 				bool ok = true;
 				if (tcp_pl_size > 0) {
