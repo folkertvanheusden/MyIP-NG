@@ -25,9 +25,18 @@ int main(int argc, char *argv[])
 #if defined(NDEBUG)
 	printf("ASSERT IS DISABLED: NOT A DEBUG BUILD\n");
 #endif
-	if (argc != 2) {
-		fprintf(stderr, "Usage: %s count\n", argv[0]);
+	if (argc != 2 && argc != 3) {
+		fprintf(stderr, "Usage: %s count [file.dat]\n", argv[0]);
 		return 1;
+	}
+
+	FILE *fh = nullptr;
+	if (argc == 3) {
+		fh = fopen(argv[2], "w");
+		if (!fh) {
+			fprintf(stderr, "Cannot create \"%s\"\n", argv[2]);
+			return 1;
+		}
 	}
 
 	constexpr const int queue_size = sizeof(uint64_t) + 128;
@@ -50,8 +59,10 @@ int main(int argc, char *argv[])
 	std::thread t1([&q_a, count, &samples] {
 			for(int i=0; i<count; i++) {
 				auto    *p       = q_a.wait_for_message(1000, shm_message_queue::msg_any, { });
-				if (!p)
+				if (!p) {
+					fprintf(stderr, "sample lost\n");
 					continue;
+				}
 				auto     now     = get_us();
 				uint64_t sent_at = *reinterpret_cast<const uint64_t *>(p->data);
 				samples[i] = now - sent_at;
@@ -101,6 +112,12 @@ int main(int argc, char *argv[])
 	printf("Average : %.2f μs, standard deviation: %.2f μs\n", avg, sqrt(sd_sum / count - avg * avg));
 	printf("Median  : %" PRId64 " μs\n", samples[count / 2]);
 	printf("P95     : %.2f μs\n", p95);
+
+	if (fh) {
+		for(auto & v: samples)
+			fprintf(fh, "%" PRId64 "\n", v);
+		fclose(fh);
+	}
 
 	return 0;
 }
