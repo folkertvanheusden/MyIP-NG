@@ -91,10 +91,16 @@ int main(int argc, char *argv[])
 
 	double avg = sum / double(count);
 
+	double p    = 0.95 * (count - 1);
+	double part = p - floor(p);
+	size_t idx  = size_t(p);
+	double p95  = samples[idx] + part * (samples[idx + 1] - samples[idx]);
+
 	printf("Shortest: %" PRId64 " μs\n", samples[0]);
 	printf("Longest : %" PRId64 " μs\n", samples[count - 1]);
 	printf("Average : %.2f μs, standard deviation: %.2f μs\n", avg, sqrt(sd_sum / count - avg * avg));
 	printf("Median  : %" PRId64 " μs\n", samples[count / 2]);
+	printf("P95     : %.2f μs\n", p95);
 
 	return 0;
 }
