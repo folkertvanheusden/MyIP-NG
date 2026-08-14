@@ -423,7 +423,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					if (send_tcp_packet(shm, out_name,
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
-							session->local_seq, session->peer_seq,
+							session->local_seq, session->peer_seq + tcp_pl_size,
 							FLAG_ACK, session->local_window_size, { nullptr, 0 })) {
 						session->peer_seq += tcp_pl_size;
 					}
