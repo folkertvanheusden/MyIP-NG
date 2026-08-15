@@ -63,6 +63,7 @@ int main(int argc, char *argv[])
 
 	uint64_t session_id = 0;
 	int      i          = 0;
+	int      nr         = 0;
 
 	for(;;) {
 		shm_message_queue::message *m_a = q_a.wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
@@ -76,14 +77,16 @@ int main(int argc, char *argv[])
 		free(m_a);
 
 		shm_message_queue::message *m_b = q_b.wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
-		if (m_b)
+		if (m_b) {
 			emit("pl", m_b);
+			i = 0;
+		}
 		free(m_b);
 
 		if (++i == 10) {
 			printf("-> send 2nd message\n\n");
 
-			std::string msg = "Hello back!\n";
+			std::string msg = "Hello back! " + std::to_string(++nr) + "\n";
 			size_t       total_bytes  = 8 + msg.size();
 			uint8_t     *complete_msg = new uint8_t[total_bytes];
 			memcpy(&complete_msg[0], &session_id, sizeof session_id);
