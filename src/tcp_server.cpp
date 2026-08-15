@@ -598,10 +598,8 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 
 		{
 			std::unique_lock<std::mutex> lck(payload_lock);
-			auto it = payloads.find(session_id);  // TODO replace by insert + check afterwards
-			if (it == payloads.end())
-				it = payloads.insert({ session_id, { } }).first;
-			it->second.push_back(m);
+			auto rc = payloads.insert({ session_id, { } });
+			rc.first->second.push_back(m);
 			payload_cv.notify_all();
 		}
 	}
