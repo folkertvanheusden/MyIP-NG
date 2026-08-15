@@ -352,7 +352,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					send_tcp_packet(shm, out_name,
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
-							syn_cookie, 0,
+							syn_cookie, peer_seq_nr + 1,
 							FLAG_SYN | FLAG_ACK, window_size, { nullptr, 0 });
 				}
 			}
