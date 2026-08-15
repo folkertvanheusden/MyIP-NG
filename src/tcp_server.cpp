@@ -209,7 +209,8 @@ bool send_tcp_packet(shm_message_queue *const shm, const std::string & down,
 void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> & mappings_in, const std::string & icmp_error_name,
 	    const std::string & out_name,
 	    std::map<uint64_t, session_t *> *const sessions, std::mutex & sessions_lock,
-	    const uint8_t syn_cookie_salt[16])
+	    const uint8_t syn_cookie_salt[16],
+	    shm_message_queue *const shm_meta)
 {
 	set_thread_name("run_in");
 
@@ -348,11 +349,10 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " using SYN cookie %08x, acking to %08x",
 							session_id, syn_cookie, peer_seq_nr);
 
-					session->peer_seq++;
 					send_tcp_packet(shm, out_name,
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
-							syn_cookie, session->peer_seq,
+							syn_cookie, 0,
 							FLAG_SYN | FLAG_ACK, window_size, { nullptr, 0 });
 				}
 			}
@@ -378,6 +378,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				}
 			}
 			else {  // start of new session
+				auto it = mappings_in.find(destination_port);
 				// as this is a response to a SYN(+ACK), increase local sequence number
 				uint32_t syn_cookie = my_syn_cookie(session_id, syn_cookie_salt) + 1;
 				if (syn_cookie != ack_seq_nr) {
@@ -388,20 +389,43 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 							syn_cookie, peer_seq_nr,
 							FLAG_RST, window_size, { nullptr, 0 });
 				}
-				else {
+				else if (it != mappings_in.end()) {  // TODO
+					// send 'open' to shm server
+					auto        temp   = split(it->second, ",");
+					bool        failed = false;
+					std::string server_meta_name;
+					if (temp.size() == 2) {
+						server_meta_name = temp[1];
+
+						const std::string open_msg = std::format("session-id={0:x}", session_id) + "\naction=open";
+						shm_message_queue::message *m_open = allocate_shm_message(open_msg.size());
+						m_open->type = shm_message_queue::msg_reply;
+						memcpy(m_open->data, open_msg.c_str(), m_open->size);
+						failed = shm_meta->send_message(server_meta_name, m_open, false);
+						free(m_open);
+					}
+					else {
+						failed = true;
+					}
+
 					// allocate session
-					session_t *new_session = new session_t;
-					new_session->is_client         = false;
-					new_session->state             = established;
-					new_session->local_seq         = syn_cookie;
-					new_session->local_addr        = a_to;
-					new_session->local_port        = destination_port;
-					new_session->peer_seq          = peer_seq_nr;
-					new_session->peer_addr         = a_from;
-					new_session->peer_port         = source_port;
-					new_session->local_window_size = 512;  // TODO
-					std::unique_lock<std::mutex> lck(sessions_lock);
-					sessions->insert({ session_id, new_session });
+					if (failed == false) {
+						session_t *new_session = new session_t;
+						new_session->is_client         = false;
+						new_session->state             = established;
+						new_session->local_seq         = syn_cookie;
+						new_session->local_addr        = a_to;
+						new_session->local_port        = destination_port;
+						new_session->peer_seq          = peer_seq_nr;
+						new_session->peer_addr         = a_from;
+						new_session->peer_port         = source_port;
+						new_session->local_window_size = 512;  // TODO
+						memset(new_session->shm_peer, 0x00, max_id_length);  // data channel
+						memcpy(new_session->shm_peer, temp[0].c_str(), temp[0].size());
+
+						std::unique_lock<std::mutex> lck(sessions_lock);
+						sessions->insert({ session_id, new_session });
+					}
 				}
 			}
 		}
@@ -801,7 +825,8 @@ void run(shm_message_queue *const shm, const std::string & out_name,
 	 const uint8_t syn_cookie_salt[16],
 	 shm_message_queue *const shm_meta, const addr & local_addr)
 {
-	std::thread rx  ([&] { run_in  (shm, mappings_in, icmp_error_name, out_name, sessions, sessions_lock, syn_cookie_salt); });
+	std::thread rx  ([&] { run_in  (shm, mappings_in, icmp_error_name, out_name,
+				sessions, sessions_lock, syn_cookie_salt, shm_meta); });
 	std::thread tx  ([&] { run_out (shm_upper, out_name, shm, sessions, sessions_lock); });
 	std::thread meta([&] { run_meta(shm, out_name, local_addr, shm_meta, sessions, sessions_lock); });
 	meta.join();
