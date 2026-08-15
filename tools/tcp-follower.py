@@ -2,6 +2,7 @@
 
 from scapy.all import rdpcap, TCP, IP
 import sys
+import time
 
 
 packets = rdpcap(sys.argv[1])
@@ -15,6 +16,8 @@ srvr_port = None
 client = seq_nrs()
 server = seq_nrs()
 
+nr = 0
+
 for p in packets:
     if IP not in p or TCP not in p:
         continue
@@ -27,8 +30,11 @@ for p in packets:
     elif tcp.flags == 'SA':
         server.local_calc = server.start_local = server.local = tcp.seq
 
+    nr += 1
+    ts_str = time.strftime('%H:%M:%S', time.gmtime(float(p.time))) + f'.{int(p.time * 1000000) % 1000000:06}'
     print(
-        f"{p.time:.6f} "
+        f"{nr:3} "
+        f"{ts_str} "
         f"{tcp.sport:5} -> {tcp.dport:5} "
         f"flags={tcp.sprintf('%TCP.flags%'):8} "
         f"seq={tcp.seq - (server.start_local if tcp.sport == srvr_port else client.start_local):10} "
