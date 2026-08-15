@@ -259,7 +259,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		int      flags            =  pl[13];
 		uint16_t window_size      = get_uint16(&pl[14]);
 		uint32_t peer_seq_nr      = get_uint32(&pl[ 4]);
-		uint32_t my_seq_nr        = get_uint32(&pl[ 8]);
+		uint32_t ack_seq_nr       = get_uint32(&pl[ 8]);
 		int      tcp_pl_size      = pl_len - header_size;
 
 		if (header_size > pl_len) {
@@ -285,14 +285,14 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 		if (session) {
 			DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", local seq nr: %s, ack seq nr: %s",
-					session_id, seq_delta_lcl(session).c_str(), seq_delta_lcl(session, my_seq_nr).c_str());
+					session_id, seq_delta_lcl(session).c_str(), seq_delta_lcl(session, ack_seq_nr).c_str());
 			DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", expected peer seq nr: %s, recv peer seq nr: %s",
 					session_id, seq_delta_peer(session).c_str(), seq_delta_peer(session, peer_seq_nr).c_str());
 		}
 
 		bool invalid         = false;
 		bool invalid_w_rst   = true;
-		bool invalid_inc_ack = false;
+		bool invalid_inc_ack = false;  // set when a processing a SYN
 		bool clean_session   = false;
 
 		if (flags & FLAG_SYN) {
@@ -348,10 +348,11 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " using SYN cookie %08x, acking to %08x",
 							session_id, syn_cookie, peer_seq_nr);
 
+					session->peer_seq++;
 					send_tcp_packet(shm, out_name,
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
-							syn_cookie, peer_seq_nr + 1,
+							syn_cookie, session->peer_seq,
 							FLAG_SYN | FLAG_ACK, window_size, { nullptr, 0 });
 				}
 			}
@@ -363,7 +364,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					send_tcp_packet(shm, out_name,
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
-							session->local_seq, peer_seq_nr + 1,
+							session->local_seq, session->peer_seq,
 							FLAG_FIN | FLAG_ACK, window_size, { nullptr, 0 });
 
 					// TODO handle half closed sessions
@@ -375,13 +376,14 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				}
 			}
 			else {  // start of new session
+				// as this is a response to a SYN(+ACK), increase local sequence number
 				uint32_t syn_cookie = my_syn_cookie(session_id, syn_cookie_salt) + 1;
-				if (syn_cookie != my_seq_nr) {
-					DOLOG(logger::ll_debug, "ERR) Invalid SYN-cookie %08x - expecting %08x", my_seq_nr, syn_cookie);
+				if (syn_cookie != ack_seq_nr) {
+					DOLOG(logger::ll_debug, "ERR) Invalid SYN-cookie %08x - expecting %08x", ack_seq_nr, syn_cookie);
 					send_tcp_packet(shm, out_name,
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
-							syn_cookie, peer_seq_nr + 1,
+							syn_cookie, peer_seq_nr,
 							FLAG_RST, window_size, { nullptr, 0 });
 				}
 				else {
@@ -544,7 +546,8 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 								session->local_addr, session->peer_addr,
 								session->local_port, session->peer_port,
 								session->local_seq,  session->peer_seq,
-								0, session->local_window_size, { &item->data[8], pl_size }) == false) {
+								FLAG_PSH, session->local_window_size,
+								{ &item->data[8], pl_size }) == false) {
 						break;
 					}
 
@@ -764,7 +767,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 					send_tcp_packet(shm, out_name,
 							fin_session->local_addr, fin_session->peer_addr,
 							fin_session->local_port, fin_session->peer_port,
-							fin_session->local_seq,  fin_session->peer_seq + 1,
+							fin_session->local_seq + 1,  fin_session->peer_seq,
 							FLAG_FIN, fin_session->local_window_size, { nullptr, 0 });
 
 					std::unique_lock<std::mutex> lck(sessions_lock);
