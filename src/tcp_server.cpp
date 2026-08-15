@@ -361,11 +361,13 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			if (session) {
 				if (flags & FLAG_FIN) {
 					session->peer_seq++;
-					send_tcp_packet(shm, out_name,
+					if (send_tcp_packet(shm, out_name,
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
 							session->local_seq, session->peer_seq,
-							FLAG_FIN | FLAG_ACK, window_size, { nullptr, 0 });
+							FLAG_FIN | FLAG_ACK, window_size, { nullptr, 0 }) == true) {
+						session->local_seq++;
+					}
 
 					// TODO handle half closed sessions
 
