@@ -389,14 +389,15 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				else {
 					// allocate session
 					session_t *new_session = new session_t;
-					new_session->is_client  = false;
-					new_session->state      = established;
-					new_session->local_seq  = syn_cookie;
-					new_session->local_addr = a_to;
-					new_session->local_port = destination_port;
-					new_session->peer_seq   = peer_seq_nr;
-					new_session->peer_addr  = a_from;
-					new_session->peer_port  = source_port;
+					new_session->is_client         = false;
+					new_session->state             = established;
+					new_session->local_seq         = syn_cookie;
+					new_session->local_addr        = a_to;
+					new_session->local_port        = destination_port;
+					new_session->peer_seq          = peer_seq_nr;
+					new_session->peer_addr         = a_from;
+					new_session->peer_port         = source_port;
+					new_session->local_window_size = 512;  // TODO
 					std::unique_lock<std::mutex> lck(sessions_lock);
 					sessions->insert({ session_id, new_session });
 				}
@@ -546,7 +547,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 								session->local_addr, session->peer_addr,
 								session->local_port, session->peer_port,
 								session->local_seq,  session->peer_seq,
-								FLAG_PSH, session->local_window_size,
+								FLAG_ACK | FLAG_PSH, session->local_window_size,
 								{ &item->data[8], pl_size }) == false) {
 						break;
 					}
@@ -702,7 +703,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 					new_session->start_local_seq   = new_session->local_seq;
 					new_session->peer_seq          = 0;
 					new_session->start_peer_seq    = 0;
-					new_session->local_window_size = 512;
+					new_session->local_window_size = 512;  // TODO
 					new_session->local_addr        = from_addr;
 					new_session->local_port        = src_port;
 					new_session->peer_addr         = dst_addr.value();
