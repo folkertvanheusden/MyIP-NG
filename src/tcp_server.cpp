@@ -127,9 +127,9 @@ void send_icmp_error(shm_message_queue *const shm, const std::string & icmp_erro
 			{ });
 
 	if (shm->send_message(icmp_error_name, wrapped, false) == false)
-		DOLOG(logger::ll_warning, "Cannot send ICMP message");
+		DOLOG(logger::ll_warning, "ERR) Cannot send ICMP message");
 	else
-		DOLOG(logger::ll_debug, "ICMP message type %d code %d queued", type, code);
+		DOLOG(logger::ll_debug, "INF) ICMP message type %d code %d queued", type, code);
 
 	free(wrapped);
 }
@@ -196,7 +196,7 @@ bool send_tcp_packet(shm_message_queue *const shm, const std::string & down,
 
 	bool rc = shm->send_message(down, wrapped, false);
 	if (rc == false)
-		DOLOG(logger::ll_warning, "Cannot send to %s", down.c_str());
+		DOLOG(logger::ll_warning, "ERR) Cannot send to %s", down.c_str());
 
 	free(wrapped);
 
@@ -213,7 +213,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 {
 	set_thread_name("run_in");
 
-        DOLOG(logger::ll_debug, "waiting for packets (IP->TCP) on shm %s", shm->get_local_identifier().c_str());
+        DOLOG(logger::ll_debug, "INF) waiting for packets (IP->TCP) on shm %s", shm->get_local_identifier().c_str());
 
 	while(!stop_flag) {
 		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
@@ -230,14 +230,14 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
                 const uint8_t *to           = nullptr;
                 const uint8_t *pl           = nullptr;
                 if (unwrap_message_up(m, &full_pkt_len, &full_pkt, &from_len, &from, &to_len, &to, &pl_len, &pl) == false) {
-                        DOLOG(logger::ll_error, "Corrupt message in shared memory segment!");
+                        DOLOG(logger::ll_error, "ERR) Corrupt message in shared memory segment!");
                         free(m);
                         continue;
                 }
 
 		if (pl_len < 20) {
 			free(m);
-			DOLOG(logger::ll_debug, "TCP packet too small");
+			DOLOG(logger::ll_debug, "ERR) TCP packet too small");
 			continue;
 		}
 
@@ -247,7 +247,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		// check checksum
 		uint16_t checksum = tcp_udp_checksum(a_from, a_to, pl, pl_len, 6);
 		if (checksum != 0x0000) {
-			DOLOG(logger::ll_debug, "TCP packet has incorrect checksum");
+			DOLOG(logger::ll_debug, "ERR) TCP packet has incorrect checksum");
 			free(m);
 			continue;
 		}
@@ -264,11 +264,11 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 		if (header_size > pl_len) {
 			free(m);
-			DOLOG(logger::ll_debug, "TCP header too large");
+			DOLOG(logger::ll_debug, "ERR) TCP header too large");
 			continue;
 		}
 
-		DOLOG(logger::ll_debug, "TCP packet from %d to %d, session id: %" PRIx64 ", flags: %s, pl size: %d",
+		DOLOG(logger::ll_debug, "INF) TCP packet from %d to %d, session id: %" PRIx64 ", flags: %s, pl size: %d",
 				source_port, destination_port, session_id,
 				flags_to_str(flags).c_str(),
 				tcp_pl_size);
@@ -284,9 +284,9 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		}
 
 		if (session) {
-			DOLOG(logger::ll_debug, "TCP session %" PRIx64 ", local seq nr: %s, ack seq nr: %s",
+			DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", local seq nr: %s, ack seq nr: %s",
 					session_id, seq_delta_lcl(session).c_str(), seq_delta_lcl(session, my_seq_nr).c_str());
-			DOLOG(logger::ll_debug, "TCP session %" PRIx64 ", expected peer seq nr: %s, recv peer seq nr: %s",
+			DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", expected peer seq nr: %s, recv peer seq nr: %s",
 					session_id, seq_delta_peer(session).c_str(), seq_delta_peer(session, peer_seq_nr).c_str());
 		}
 
@@ -302,20 +302,20 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			if (session) {
 				if (session->is_client) {  // client? then this should be SYN/ACK
 					if ((flags & FLAG_ACK) == 0) {
-						DOLOG(logger::ll_debug, "Received SYN for session %" PRIx64 " (client)", session_id);
+						DOLOG(logger::ll_debug, "INF) Received SYN for session %" PRIx64 " (client)", session_id);
 						invalid = true;
 					}
 					else {
 						if (session->state == established)
-							DOLOG(logger::ll_debug, "Received SYN/ACK for session %" PRIx64 " (client, established state)", session_id);
+							DOLOG(logger::ll_debug, "WRN) Received SYN/ACK for session %" PRIx64 " (client, established state)", session_id);
 						else {
 							session->state = established;
-							DOLOG(logger::ll_debug, "Received SYN/ACK for session %" PRIx64 ", sending ACK", session_id);
+							DOLOG(logger::ll_debug, "INF) Received SYN/ACK for session %" PRIx64 ", sending ACK", session_id);
 							session->start_peer_seq = session->peer_seq = peer_seq_nr;
 						}
 						// send ACK
 						session->peer_seq++;
-						DOLOG(logger::ll_debug, "TCP session %" PRIx64 ", local: %u, ack: %u", session->local_seq, session->peer_seq);
+						DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", local: %u, ack: %u", session->local_seq, session->peer_seq);
 						if (send_tcp_packet(shm, out_name,
 								a_to, a_from,  // swapped: reply
 								destination_port, source_port,  // swapped: reply
@@ -323,29 +323,29 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 								FLAG_ACK, session->local_window_size, { nullptr, 0 }) == false)
 						{
 							clean_session = true;
-							DOLOG(logger::ll_debug, "Could not send ACK for client session %" PRIx64, session_id);
+							DOLOG(logger::ll_debug, "ERR) Could not send ACK for client session %" PRIx64, session_id);
 						}
 					}
 				}
 				else {
-					DOLOG(logger::ll_debug, "Received SYN for session %" PRIx64 " in ESTABLISHED state -> RST", session_id);
+					DOLOG(logger::ll_debug, "ERR) Received SYN for session %" PRIx64 " in ESTABLISHED state -> RST", session_id);
 					invalid = true;
 				}
 			}
 			else {  // new session
 				auto it = mappings_in.find(destination_port);
 				if (it == mappings_in.end()) {
-					DOLOG(logger::ll_debug, "No mapping for port %d", destination_port);
+					DOLOG(logger::ll_debug, "ERR) No mapping for port %d", destination_port);
 					invalid = true;
 				}
 				else if (flags & (FLAG_FIN | FLAG_RST | FLAG_PSH | FLAG_URG | FLAG_ACK)) {
-					DOLOG(logger::ll_debug, "Invalid flags set (%s) combined with SYN in a new session -> RST", flags_to_str(flags).c_str());
+					DOLOG(logger::ll_debug, "ERR) Invalid flags set (%s) combined with SYN in a new session -> RST", flags_to_str(flags).c_str());
 					invalid = true;
 					invalid_w_rst = !(flags & FLAG_RST);  // no RST if the flags already contain RST
 				}
 				else {
 					uint32_t syn_cookie = my_syn_cookie(session_id, syn_cookie_salt);
-					DOLOG(logger::ll_debug, "Session %" PRIx64 " using SYN cookie %08x, acking to %08x",
+					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " using SYN cookie %08x, acking to %08x",
 							session_id, syn_cookie, peer_seq_nr);
 
 					send_tcp_packet(shm, out_name,
@@ -377,7 +377,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			else {  // start of new session
 				uint32_t syn_cookie = my_syn_cookie(session_id, syn_cookie_salt) + 1;
 				if (syn_cookie != my_seq_nr) {
-					DOLOG(logger::ll_debug, "Invalid SYN-cookie %08x - expecting %08x", my_seq_nr, syn_cookie);
+					DOLOG(logger::ll_debug, "ERR) Invalid SYN-cookie %08x - expecting %08x", my_seq_nr, syn_cookie);
 					send_tcp_packet(shm, out_name,
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
@@ -401,7 +401,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			}
 		}
 		else {
-			DOLOG(logger::ll_debug, "Session %" PRIx64 " has an unexpected state", session_id);
+			DOLOG(logger::ll_debug, "ERR) Session %" PRIx64 " has an unexpected state", session_id);
 		}
 
 		// send data to other end (local shm peer)
@@ -419,7 +419,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				}
 
 				if (ok) {
-					DOLOG(logger::ll_debug, "Session %" PRIx64 ", data sent to client", session_id);
+					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 ", data sent to client", session_id);
 					if (send_tcp_packet(shm, out_name,
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
@@ -430,16 +430,16 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					else
 					{
 						clean_session = true;
-						DOLOG(logger::ll_debug, "Could not ACK data for session %" PRIx64, session_id);
+						DOLOG(logger::ll_debug, "ERR) Could not ACK data for session %" PRIx64, session_id);
 					}
 				}
 				else {
-					DOLOG(logger::ll_debug, "Cannot send to peer shm, session %" PRIx64, session_id);
+					DOLOG(logger::ll_debug, "ERR) Cannot send to peer shm, session %" PRIx64, session_id);
 					// do nothing, tcp-peer should retry eventually
 				}
 			}
 			else if (peer_seq_nr < session->peer_seq) {
-				DOLOG(logger::ll_debug, "Peer resends packet for session %" PRIx64, session_id);
+				DOLOG(logger::ll_debug, "INF) Peer resends packet for session %" PRIx64, session_id);
 
 				if (send_tcp_packet(shm, out_name,
 							a_to, a_from,  // swapped: reply
@@ -447,15 +447,15 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 							session->local_seq, session->peer_seq,
 							FLAG_ACK, session->local_window_size, { nullptr, 0 }) == false) {
 					clean_session = true;
-					DOLOG(logger::ll_debug, "Could not ACK data for session %" PRIx64, session_id);
+					DOLOG(logger::ll_debug, "ERR) Could not ACK data for session %" PRIx64, session_id);
 				}
 			}
 			else {
-				DOLOG(logger::ll_debug, "TCP out of order packet, expecting seq %u, got %u for session %" PRIx64, session->peer_seq, peer_seq_nr, session_id);
+				DOLOG(logger::ll_debug, "ERR) TCP out of order packet, expecting seq %u, got %u for session %" PRIx64, session->peer_seq, peer_seq_nr, session_id);
 			}
 		}
 		else {
-			DOLOG(logger::ll_debug, "Packet for an not known session with id %" PRIx64, session_id);
+			DOLOG(logger::ll_debug, "WRN) Packet for an not known session with id %" PRIx64, session_id);
 		}
 
 		if (invalid || clean_session) {
@@ -491,8 +491,8 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 {
 	set_thread_name("run_out");
 
-        DOLOG(logger::ll_debug, "waiting for packets (client->TCP) on shm %s", shm->get_local_identifier().c_str());
-        DOLOG(logger::ll_debug, "sending packets to %s (TCP->IP) via shm-name %s", out_name.c_str(), shm_out->get_local_identifier().c_str());
+        DOLOG(logger::ll_debug, "INF) waiting for packets (client->TCP) on shm %s", shm->get_local_identifier().c_str());
+        DOLOG(logger::ll_debug, "INF) sending packets to %s (TCP->IP) via shm-name %s", out_name.c_str(), shm_out->get_local_identifier().c_str());
 
 	std::map<uint64_t, std::vector<shm_message_queue::message *> > payloads;
 	std::mutex              payload_lock;
@@ -520,7 +520,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 				}
 
 				if (session == nullptr) {
-					DOLOG(logger::ll_warning, "TCP session not found for %" PRIx64, target.first);
+					DOLOG(logger::ll_warning, "WRN) TCP session not found for %" PRIx64, target.first);
 					for(auto & item: target.second)
 						free(item);
 					forget.push_back(target.first);
@@ -528,7 +528,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 				}
 
 				if (session)
-					DOLOG(logger::ll_debug, "TCP session %" PRIx64 ", local seq nr: %s",
+					DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", local seq nr: %s",
 							target.first, seq_delta_lcl(session).c_str());
 
 
@@ -539,7 +539,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 
 					// TODO handle peer window size
 
-					DOLOG(logger::ll_debug, "TCP sent packet to %s for session %" PRIx64, out_name.c_str(), target.first);
+					DOLOG(logger::ll_debug, "INF) TCP sent packet to %s for session %" PRIx64, out_name.c_str(), target.first);
 					if (send_tcp_packet(shm_out, out_name,
 								session->local_addr, session->peer_addr,
 								session->local_port, session->peer_port,
@@ -558,10 +558,10 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 				session->lock.unlock();
 
 				if (n)
-					DOLOG(logger::ll_debug, "TCP sent %d item(s) for session %" PRIx64, n, target.first);
+					DOLOG(logger::ll_debug, "INF) TCP sent %d item(s) for session %" PRIx64, n, target.first);
 
 				if (target.second.empty()) {
-					DOLOG(logger::ll_debug, "TCP queue for session %" PRIx64 " is empty", target.first);
+					DOLOG(logger::ll_debug, "INF) TCP queue for session %" PRIx64 " is empty", target.first);
 					forget.push_back(target.first);
 				}
 			}
@@ -577,7 +577,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 			continue;
 
 		if (m->size <= 8) {
-			DOLOG(logger::ll_error, "TCP payload message too short");
+			DOLOG(logger::ll_error, "ERR) TCP payload message too short");
 			free(m);
 			continue;
 		}
@@ -586,7 +586,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 		uint64_t session_id = 0;
 		memcpy(&session_id, m->data, 8);
 
-		DOLOG(logger::ll_debug, "TCP outbound for %" PRIx64 " received", session_id);
+		DOLOG(logger::ll_debug, "INF) TCP outbound for %" PRIx64 " received", session_id);
 
 		// TODO max size & session time out
 
@@ -622,7 +622,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 		std::string kv(reinterpret_cast<const char *>(m->data), m->size);
 		auto lines = split(kv, "\n");
 		if (lines.size() < 2) {
-			DOLOG(logger::ll_error, "TCP meta message missing data");
+			DOLOG(logger::ll_error, "ERR) TCP meta message missing data");
 			free(m);
 			continue;
 		}
@@ -635,10 +635,10 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 
 		bool invalid = false;
 		for(auto & line: lines) {
-			DOLOG(logger::ll_debug, "Received cfg item: \"%s\" from %s", line.c_str(), m->sender);
+			DOLOG(logger::ll_debug, "INF) Received cfg item: \"%s\" from %s", line.c_str(), m->sender);
 			auto parts = split(line, "=");
 			if (parts.size() != 2) {
-				DOLOG(logger::ll_error, "TCP meta message line invalid (missing either value or key: \"%s\")", line.c_str());
+				DOLOG(logger::ll_error, "ERR) TCP meta message line invalid (missing either value or key: \"%s\")", line.c_str());
 				invalid = true;
 				break;
 			}
@@ -649,7 +649,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 				else if (parts[1] == "close")
 					action = close;
 				else {
-					DOLOG(logger::ll_error, "TCP meta: invalid action \"%s\"", parts[1].c_str());
+					DOLOG(logger::ll_error, "ERR) TCP meta: invalid action \"%s\"", parts[1].c_str());
 					invalid = true;
 					break;
 				}
@@ -667,7 +667,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 				shm_data_address = parts[1];
 			}
 			else {
-				DOLOG(logger::ll_error, "TCP meta: invalid key \"%s\"", line.c_str());
+				DOLOG(logger::ll_error, "ERR) TCP meta: invalid key \"%s\"", line.c_str());
 				invalid = true;
 				break;
 			}
@@ -679,7 +679,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 
 		if (action == open) {
 			if (dst_port.has_value() && dst_addr.has_value() && shm_data_address.has_value()) {
-				DOLOG(logger::ll_debug, "Opening TCP session to [%s]:%d",
+				DOLOG(logger::ll_debug, "INF) Opening TCP session to [%s]:%d",
 					dst_addr.value().to_str('.', false).c_str(), dst_port.value());
 				bool     failed   = false;
 				uint16_t src_port = 0;
@@ -729,7 +729,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 						delete new_session;
 					else {
 						local_allocated_ports.insert({ src_port, session_id });
-						DOLOG(logger::ll_debug, "New TCP client session with id %" PRIx64, session_id);
+						DOLOG(logger::ll_debug, "INF) New TCP client session with id %" PRIx64, session_id);
 
 						std::unique_lock<std::mutex> lck(sessions_lock);
 						sessions->insert({ session_id, new_session });
@@ -737,7 +737,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 				}
 			}
 			else {
-				DOLOG(logger::ll_error, "TCP meta: open-action missing dst-port, dst-addr or shm-data-address");
+				DOLOG(logger::ll_error, "ERR) TCP meta: open-action missing dst-port, dst-addr or shm-data-address");
 			}
 		}
 		else if (action == close) {
@@ -759,7 +759,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 					if (ports_it->second == session_id)
 						local_allocated_ports.erase(ports_it);
 					else
-						DOLOG(logger::ll_error, "TCP meta: local port %u is mapped to an other session %x, not %x", ports_it->second, session_id);
+						DOLOG(logger::ll_error, "ERR) TCP meta: local port %u is mapped to an other session %x, not %x", ports_it->second, session_id);
 
 					send_tcp_packet(shm, out_name,
 							fin_session->local_addr, fin_session->peer_addr,
@@ -774,15 +774,15 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 					delete fin_session;
 				}
 				else {
-					DOLOG(logger::ll_warning, "TCP meta: session %" PRIx64 " not in map", session_id);
+					DOLOG(logger::ll_warning, "ERR) TCP meta: session %" PRIx64 " not in map", session_id);
 				}
 			}
 			else {
-				DOLOG(logger::ll_error, "TCP meta: close-action missing session-id");
+				DOLOG(logger::ll_error, "ERR) TCP meta: close-action missing session-id");
 			}
 		}
 		else {
-			DOLOG(logger::ll_error, "TCP meta: internal error");
+			DOLOG(logger::ll_error, "ERR) TCP meta: internal error");
 		}
 
 		free(m);
@@ -828,13 +828,13 @@ addr_ip4 cfg_runtime(shm_message_queue *const shm_meta, const std::string & meta
 		uint64_t now = get_us();
 
 		if (now - last_tx > 2'000'000) {
-			DOLOG(logger::ll_debug, "Requesting IP4 address from \"%s\"", meta_name_ip4_server.c_str());
+			DOLOG(logger::ll_debug, "INF) Requesting IP4 address from \"%s\"", meta_name_ip4_server.c_str());
 
 			auto temp = send_meta_request(shm_meta, meta_name_ip4_server, "get-ip4");
 			if (temp.has_value()) {
 				last_tx = now;
 				msg_nr  = temp.value();
-				DOLOG(logger::ll_debug, "Message sent with id %" PRIu64, msg_nr);
+				DOLOG(logger::ll_debug, "INF) Message sent with id %" PRIu64, msg_nr);
 			}
 			else {
 				usleep(SLEEP_INTERVAL_MS);
@@ -845,11 +845,11 @@ addr_ip4 cfg_runtime(shm_message_queue *const shm_meta, const std::string & meta
 		auto *reply = shm_meta->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_reply, msg_nr);
 		if (reply) {
 			std::string reply_str(reinterpret_cast<const char *>(reply->data), reply->size);
-			DOLOG(logger::ll_debug, "Reply received: \"%s\"", reply_str.c_str());
+			DOLOG(logger::ll_debug, "INF) Reply received: \"%s\"", reply_str.c_str());
 			free(reply);
 			if (reply_str.substr(0, 4) == "ip4=")
 				return addr(reply_str.substr(4), ".", false);
-			DOLOG(logger::ll_warning, "Unexpected reply");
+			DOLOG(logger::ll_warning, "ERR) Unexpected reply");
 		}
 
 		usleep(100'000);
