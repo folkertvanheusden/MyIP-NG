@@ -360,7 +360,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		else if (flags & FLAG_ACK) {
 			if (session) {
 				if (flags & FLAG_FIN) {
-					session->local_seq++;
+					session->peer_seq++;
 					send_tcp_packet(shm, out_name,
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
