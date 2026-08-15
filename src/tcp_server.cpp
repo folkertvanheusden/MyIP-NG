@@ -401,7 +401,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						shm_message_queue::message *m_open = allocate_shm_message(open_msg.size());
 						m_open->type = shm_message_queue::msg_reply;
 						memcpy(m_open->data, open_msg.c_str(), m_open->size);
-						failed = shm_meta->send_message(server_meta_name, m_open, false);
+						failed = shm_meta->send_message(server_meta_name, m_open, false) == false;
 						free(m_open);
 					}
 					else {
@@ -410,6 +410,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 					// allocate session
 					if (failed == false) {
+						DOLOG(logger::ll_debug, "INF) server for TCP/%d notified of new session %" PRIx64, destination_port, session_id);
 						session_t *new_session = new session_t;
 						new_session->is_client         = false;
 						new_session->state             = established;
@@ -425,6 +426,14 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 						std::unique_lock<std::mutex> lck(sessions_lock);
 						sessions->insert({ session_id, new_session });
+					}
+					else {
+						DOLOG(logger::ll_debug, "ERR) cannot setup session for TCP/%d, session %" PRIx64, destination_port, session_id);
+						send_tcp_packet(shm, out_name,
+								a_to, a_from,  // swapped: reply
+								destination_port, source_port,  // swapped: reply
+								syn_cookie, peer_seq_nr,
+								FLAG_RST, window_size, { nullptr, 0 });
 					}
 				}
 			}
@@ -489,6 +498,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 		if (invalid || clean_session) {
 			if (invalid && invalid_w_rst) {
+				DOLOG(logger::ll_debug, "INF) send RST for [%s]:%d to [%s]:%d", a_to.to_str('.', false).c_str(), destination_port, a_from.to_str('.', false).c_str(), source_port);
 				send_tcp_packet(shm, out_name,
 						a_to, a_from,  // swapped: reply
 						destination_port, source_port,  // swapped: reply
