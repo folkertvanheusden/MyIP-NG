@@ -35,6 +35,133 @@ void sig_handler(int sig)
 	stop_flag = true;
 }
 
+void abort_session(const uint64_t session_id, http_session_t *const hs, shm_message_queue *const shm, const std::string & out_name)
+{
+	shm_message_queue::message *abort_msg = allocate_shm_message(12);
+	memcpy(&abort_msg->data[0], &session_id, 8);
+	uint32_t flags = 1;
+	memcpy(&abort_msg->data[8], &flags, 4);
+
+	if (shm->send_message(out_name, abort_msg, false) == false)
+		DOLOG(logger::ll_warning, "Cannot send to %s", out_name.c_str());
+
+	free(abort_msg);
+}
+
+bool send_http_header(const uint64_t session_id, shm_message_queue *const shm, const std::string & out_name, const int which, const size_t payload_size, const bool fin, const std::string & message)
+{
+	DOLOG(logger::ll_debug, "Sending HTTP %d code (\"%s\")", which, message.c_str());
+
+	const std::string http_headers = std::format("HTTP/1.0 {} {}\r\nContent-Type: text/html\r\nContent-Size: {}\r\n\r\n", which, message, payload_size);
+
+	shm_message_queue::message *http_reply = allocate_shm_message(12 + http_headers.size());
+	memcpy(&http_reply->data[0], &session_id, 8);
+	uint32_t flags = fin ? 1 : 0;
+	memcpy(&http_reply->data[8], &flags, 4);
+	memcpy(&http_reply->data[12], http_headers.c_str(), http_reply->size - 12);
+
+	bool rc = shm->send_message(out_name, http_reply, false);
+	if (rc == false)
+		DOLOG(logger::ll_warning, "Cannot send HTTP headers to %s", out_name.c_str());
+
+	free(http_reply);
+
+	return rc;
+}
+
+void process_http_request(const uint64_t session_id, http_session_t *const hs, shm_message_queue *const shm, const std::string & out_name)
+{
+	bool        first_line = true;
+	std::string url;
+	auto        lines = split(hs->recv_buffer, "\r\n");
+	for(auto & line: lines) {
+		if (first_line) {
+			first_line = false;
+
+			auto parts = split(line, " ");
+			if (parts.size() != 3) {
+				send_http_header(session_id, shm, out_name, 405, 0, true, "Can't make cheese from your supposedly HTTP request");
+				return;
+			}
+
+			if (parts[0] == "GET") {
+				url = line.substr(4);
+				auto space = url.find(" ");
+				if (space == std::string::npos) {  // invalid
+					abort_session(session_id, hs, shm, out_name);
+					return;
+				}
+				url = url.substr(0, space);
+			}
+			else {
+				send_http_header(session_id, shm, out_name, 501, 0, true, "Only GET please");
+				return;
+			}
+		}
+	}
+
+	if (url.empty()) {
+		send_http_header(session_id, shm, out_name, 405, 0, true, "URL missing");
+		return;
+	}
+
+	DOLOG(logger::ll_debug, "Processing URL \"%s\"", url.c_str());
+
+	if (url == "/") {
+		const std::string http_payload = "Hello, world!";
+		const std::string http_headers = std::format("HTTP/1.0 200 All good sofar\r\nContent-Type: text/html\r\nContent-Size: {}\r\n\r\n", http_payload.size());
+		const std::string http_data = http_headers + http_payload;
+
+		shm_message_queue::message *http_reply = allocate_shm_message(12 + http_data.size());
+		memcpy(&http_reply->data[0], &session_id, 8);
+		uint32_t flags = 1;  // send FIN in-line
+		memcpy(&http_reply->data[8], &flags, 4);
+		memcpy(&http_reply->data[12], http_data.c_str(), http_reply->size - 12);
+
+		if (shm->send_message(out_name, http_reply, false) == false)
+			DOLOG(logger::ll_warning, "Cannot send to %s", out_name.c_str());
+
+		free(http_reply);
+	}
+	else if (url == "/video.mp4") {
+		FILE *fh = fopen("/home/folkert/video_2026-08-07_17-37-35.mp4", "r");
+		if (fh) {  // TODO: get mtu size and/or get IP4 to fragment
+			fseek(fh, 0, SEEK_END);
+			auto length = ftell(fh);
+			fseek(fh, 0, SEEK_SET);
+
+			if (send_http_header(session_id, shm, out_name, 200, length, false, "Ok!")) {
+				DOLOG(logger::ll_debug, "Headers sent for %" PRIx64, session_id);
+				while(length > 0) {
+					shm_message_queue::message *http_reply = allocate_shm_message(12 + 512);
+					memcpy(&http_reply->data[0], &session_id, 8);
+
+					auto n = fread(&http_reply->data[12], 1, 512, fh);
+					DOLOG(logger::ll_debug, "Sending %zu bytes from offset %lu to %" PRIx64, session_id);
+					uint32_t flags = n < 512 ? 1 : 0;  // send FIN in-line
+					memcpy(&http_reply->data[8], &flags, 4);
+					http_reply->size = 12 + n;
+
+					if (shm->send_message(out_name, http_reply, true) == false) {
+						DOLOG(logger::ll_warning, "Cannot send to %s", out_name.c_str());
+						free(http_reply);
+						break;
+					}
+
+					free(http_reply);
+
+					length -= n;
+				}
+			}
+
+			fclose(fh);
+		}
+	}
+	else {
+		send_http_header(session_id, shm, out_name, 404, 0, true, "Not found");
+	}
+}
+
 void push_meta_reply(shm_message_queue *const shm_meta, const std::string & to, const std::string & reply)
 {
 	DOLOG(logger::ll_debug, "Pushing reply to \"%s\"", to.c_str());
@@ -50,6 +177,8 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 		std::map<uint64_t, http_session_t *> *const sessions, std::mutex & sessions_lock,
 		shm_message_queue *const shm_meta)
 {
+	set_thread_name("run_in");
+
 	while(!stop_flag) {
 		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
 		if (!m)
@@ -83,25 +212,29 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 				std::string temp(reinterpret_cast<const char *>(m->data + 8), m->size - 8);
 				hs->recv_buffer += temp;
 
+				bool finish = false;
+
 				size_t end_marker = hs->recv_buffer.find("\r\n\r\n");
-				if (end_marker == std::string::npos)
-					end_marker = hs->recv_buffer.find("\n\n");
 				if (end_marker != std::string::npos) {
-					DOLOG(logger::ll_debug, "Replying to HTTP request for %" PRIx64 " via %s", session_id, out_name.c_str());
-					const std::string http_payload = "Hello, world!";
-					const std::string http_headers = std::format("HTTP/1.0 200 All good sofar\r\nContent-Type: text/html\r\nContent-Size: {}\r\n\r\n", http_payload.size());
-					const std::string http_data = http_headers + http_payload;
+					// TODO in a thread as it may take a while (relatively)
+					process_http_request(session_id, hs, shm, out_name);
 
-					shm_message_queue::message *http_reply = allocate_shm_message(12 + http_data.size());
-					memcpy(&http_reply->data[0], &session_id, 8);
-					uint32_t flags = 1;  // send FIN in-line
-					memcpy(&http_reply->data[8], &flags, 4);
-					memcpy(&http_reply->data[12], http_data.c_str(), http_reply->size - 12);
+					finish = true;
+				}
+				else if (hs->recv_buffer.size() > 4096) {
+					abort_session(session_id, hs, shm, out_name);
+					finish = true;
+				}
 
-					if (shm->send_message(out_name, http_reply, false) == false)
-						DOLOG(logger::ll_warning, "Cannot send to %s", out_name.c_str());
-
-					free(http_reply);
+				if (finish) {
+					std::unique_lock<std::mutex> lck(sessions_lock);
+					auto it = sessions->find(session_id);
+					if (it == sessions->end())
+						DOLOG(logger::ll_error, "Internal error: session %" PRIx64 " not known", session_id);
+					else {
+						delete it->second;
+						sessions->erase(it);
+					}
 				}
 			}
 		}
@@ -109,14 +242,14 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 			DOLOG(logger::ll_warning, "HTTP session %" PRIx64 " not found", session_id);
 		}
 
-		// TODO
-
 		free(m);
 	}
 }
 
 void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, http_session_t *> *const sessions, std::mutex & sessions_lock)
 {
+	set_thread_name("run_meta");
+
 	while(!stop_flag) {
 		shm_message_queue::message *m = shm_meta->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
 		if (!m)
