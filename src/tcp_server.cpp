@@ -5,7 +5,7 @@
 #include <condition_variable>
 #include <csignal>
 #include <map>
-#include <mutex>
+#include <shared_mutex>
 #include <thread>
 #include <iniparser/iniparser.h>
 #include <sys/random.h>
@@ -53,8 +53,6 @@ struct session_t {
 	uint16_t    local_port;
 	addr        peer_addr;
 	uint16_t    peer_port;
-
-	std::mutex  lock;
 };
 
 std::atomic_bool stop_flag { false };
@@ -208,7 +206,7 @@ bool send_tcp_packet(shm_message_queue *const shm, const std::string & down,
 // ip -> tcp
 void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> & mappings_in, const std::string & icmp_error_name,
 	    const std::string & out_name,
-	    std::map<uint64_t, session_t *> *const sessions, std::mutex & sessions_lock,
+	    std::map<uint64_t, session_t *> *const sessions, std::shared_mutex & sessions_lock,
 	    const uint8_t syn_cookie_salt[16],
 	    shm_message_queue *const shm_meta)
 {
@@ -274,15 +272,11 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				flags_to_str(flags).c_str(),
 				tcp_pl_size);
 
+		std::shared_lock<std::shared_mutex> lck(sessions_lock);
 		session_t *session = nullptr;
-		{
-			std::unique_lock<std::mutex> lck(sessions_lock);
-			auto it = sessions->find(session_id);
-			if (it != sessions->end()) {
-				session = it->second;
-				session->lock.lock();
-			}
-		}
+		auto it = sessions->find(session_id);
+		if (it != sessions->end())
+			session = it->second;
 
 		if (session) {
 			DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", local seq nr: %s, ack seq nr: %s",
@@ -424,8 +418,12 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						memset(new_session->shm_peer, 0x00, max_id_length);  // data channel
 						memcpy(new_session->shm_peer, temp[0].c_str(), temp[0].size());
 
-						std::unique_lock<std::mutex> lck(sessions_lock);
-						sessions->insert({ session_id, new_session });
+						lck.unlock();
+						{
+							std::unique_lock<std::shared_mutex> lck_u(sessions_lock);
+							sessions->insert({ session_id, new_session });
+						}
+						lck.lock();
 					}
 					else {
 						DOLOG(logger::ll_debug, "ERR) cannot setup session for TCP/%d, session %" PRIx64, destination_port, session_id);
@@ -507,17 +505,14 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			}
 
 			if (session) {
-				std::unique_lock<std::mutex> lck(sessions_lock);
-				// remove from the map
-				sessions->erase(session_id);
-				// now it can be unlocked and deleted
-				session->lock.unlock();
-				delete session;
+				lck.unlock();
+				{
+					std::unique_lock<std::shared_mutex> lck(sessions_lock);
+					sessions->erase(session_id);
+					delete session;
+				}
+				lck.lock();
 			}
-		}
-		else {
-			if (session)
-				session->lock.unlock();
 		}
 
 		free(m);
@@ -526,7 +521,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 // tcp -> ip
 void run_out(shm_message_queue *const shm, const std::string & out_name, shm_message_queue *const shm_out,
-	    std::map<uint64_t, session_t *> *const sessions, std::mutex & sessions_lock)
+	    std::map<uint64_t, session_t *> *const sessions, std::shared_mutex & sessions_lock)
 {
 	set_thread_name("run_out");
 
@@ -549,14 +544,10 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 
 			for(auto & target: payloads) {
 				session_t *session = nullptr;
-				{
-					std::unique_lock<std::mutex> lck(sessions_lock);
-					auto it = sessions->find(target.first);
-					if (it != sessions->end()) {
-						session = it->second;
-						session->lock.lock();
-					}
-				}
+				std::shared_lock<std::shared_mutex> lck(sessions_lock);
+				auto it = sessions->find(target.first);
+				if (it != sessions->end())
+					session = it->second;
 
 				if (session == nullptr) {
 					DOLOG(logger::ll_warning, "WRN) TCP session not found for %" PRIx64, target.first);
@@ -600,8 +591,6 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 					target.second.erase(target.second.begin() + 0);
 					n++;
 				}
-
-				session->lock.unlock();
 
 				if (n)
 					DOLOG(logger::ll_debug, "INF) TCP sent %d item(s) for session %" PRIx64, n, target.first);
@@ -650,7 +639,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 void run_meta(shm_message_queue *const shm, const std::string & out_name,
 	      const addr & from_addr,
 	      shm_message_queue *const shm_meta,
-	      std::map<uint64_t, session_t *> *const sessions, std::mutex & sessions_lock)
+	      std::map<uint64_t, session_t *> *const sessions, std::shared_mutex & sessions_lock)
 {
 	set_thread_name("run_meta");
 
@@ -775,7 +764,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 						local_allocated_ports.insert({ src_port, session_id });
 						DOLOG(logger::ll_debug, "INF) New TCP client session with id %" PRIx64, session_id);
 
-						std::unique_lock<std::mutex> lck(sessions_lock);
+						std::unique_lock<std::shared_mutex> lck(sessions_lock);
 						sessions->insert({ session_id, new_session });
 					}
 				}
@@ -789,14 +778,15 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 				// send FIN, close session
 				session_t *fin_session = nullptr;
 				{
-					std::unique_lock<std::mutex> lck(sessions_lock);
+					std::unique_lock<std::shared_mutex> lck(sessions_lock);
 					auto it = sessions->find(session_id.value());
-					if (it != sessions->end())
+					if (it != sessions->end()) {
 						fin_session = it->second;
+						sessions->erase(it);  // wil end anyway
+					}
 				}
 
 				if (fin_session != nullptr) {
-					std::unique_lock<std::mutex> fin_lck(fin_session->lock);
 					fin_session->local_seq++;
 
 					auto ports_it = local_allocated_ports.find(fin_session->local_port);
@@ -811,10 +801,6 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 							fin_session->local_seq + 1,  fin_session->peer_seq,
 							FLAG_FIN, fin_session->local_window_size, { nullptr, 0 });
 
-					std::unique_lock<std::mutex> lck(sessions_lock);
-					sessions->erase(session_id.value());
-
-					fin_session->lock.unlock();
 					delete fin_session;
 				}
 				else {
@@ -837,7 +823,7 @@ void run(shm_message_queue *const shm, const std::string & out_name,
 	 const std::map<uint16_t, std::string> & mappings_in,
 	 shm_message_queue *const shm_upper,
 	 const std::string & icmp_error_name,
-	 std::map<uint64_t, session_t *> *const sessions, std::mutex & sessions_lock,
+	 std::map<uint64_t, session_t *> *const sessions, std::shared_mutex & sessions_lock,
 	 const uint8_t syn_cookie_salt[16],
 	 shm_message_queue *const shm_meta, const addr & local_addr)
 {
@@ -982,7 +968,7 @@ int main(int argc, char *argv[])
 		return 1;
 
 	std::map<uint64_t, session_t *> sessions;
-	std::mutex sessions_lock;
+	std::shared_mutex sessions_lock;
 
 	uint8_t syn_cookie_salt[16];  // key size required by SipHAsh
 	my_random(syn_cookie_salt, sizeof syn_cookie_salt);
