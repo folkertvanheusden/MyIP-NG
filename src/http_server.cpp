@@ -92,18 +92,16 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 					const std::string http_headers = std::format("HTTP/1.0 200 All good sofar\r\nContent-Type: text/html\r\nContent-Size: {}\r\n\r\n", http_payload.size());
 					const std::string http_data = http_headers + http_payload;
 
-					shm_message_queue::message *http_reply = allocate_shm_message(8 + http_data.size());
+					shm_message_queue::message *http_reply = allocate_shm_message(12 + http_data.size());
 					memcpy(&http_reply->data[0], &session_id, 8);
-					memcpy(&http_reply->data[8], http_data.c_str(), http_reply->size - 8);
+					uint32_t flags = 1;  // send FIN in-line
+					memcpy(&http_reply->data[8], &flags, 4);
+					memcpy(&http_reply->data[12], http_data.c_str(), http_reply->size - 12);
 
 					if (shm->send_message(out_name, http_reply, false) == false)
 						DOLOG(logger::ll_warning, "Cannot send to %s", out_name.c_str());
 
 					free(http_reply);
-
-					// send close
-//					const std::string close_msg = std::format("session-id={0:x}", session_id) + "\naction=close";
-//					push_meta_reply(shm_meta, m->sender, close_msg);
 				}
 			}
 		}

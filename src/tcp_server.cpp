@@ -574,7 +574,11 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 				int n = 0;
 				while(target.second.empty() == false) {
 					auto item    = target.second.front();
-					int  pl_size = item->size - 8;
+					int  pl_size = item->size - 12;
+
+					uint32_t flags = 0;
+					memcpy(&flags, &item->data[8], 4);
+					bool send_fin = flags & 1;
 
 					// TODO handle peer window size
 
@@ -584,8 +588,8 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 								session->local_addr, session->peer_addr,
 								session->local_port, session->peer_port,
 								session->local_seq,  session->peer_seq,
-								FLAG_ACK | FLAG_PSH, session->local_window_size,
-								{ &item->data[8], pl_size }) == false) {
+								(send_fin ? FLAG_FIN : 0) | FLAG_ACK | FLAG_PSH, session->local_window_size,
+								{ &item->data[12], pl_size }) == false) {
 						// do not free or erase item here, will be retried later
 						break;
 					}
