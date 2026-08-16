@@ -594,7 +594,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 						break;
 					}
 
-					session->local_seq += pl_size;
+					session->local_seq += pl_size + send_fin;
 
 					free(item);
 					target.second.erase(target.second.begin() + 0);
