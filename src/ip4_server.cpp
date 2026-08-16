@@ -284,6 +284,10 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 
 std::optional<uint64_t> start_resolve_by_ip4(shm_message_queue *const shm_resolver_replies, const std::string & resolver_name, const addr_ip4 & a)
 {
+	DOLOG(logger::ll_debug, "Resolve \"%s\" by \"%s\" via \"%s\"",
+			a.to_str('.', false).c_str(), resolver_name.c_str(),
+			shm_resolver_replies->get_local_identifier().c_str());
+
 	const std::string msg = std::format("search-mac={0}", a.to_str('.', false));
 
 	shm_message_queue::message *res_req_msg = allocate_shm_message(msg.size());
