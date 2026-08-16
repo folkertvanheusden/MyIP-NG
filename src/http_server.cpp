@@ -22,7 +22,10 @@
 
 struct http_session_t
 {
-	std::string test;
+	std::string recv_buffer;
+
+	http_session_t() {
+	}
 };
 
 std::atomic_bool stop_flag { false };
@@ -32,8 +35,20 @@ void sig_handler(int sig)
 	stop_flag = true;
 }
 
+void push_meta_reply(shm_message_queue *const shm_meta, const std::string & to, const std::string & reply)
+{
+	DOLOG(logger::ll_debug, "Pushing reply to \"%s\"", to.c_str());
+
+	shm_message_queue::message *m_reply = allocate_shm_message(reply.size());
+	m_reply->type   = shm_message_queue::msg_reply;
+	memcpy(m_reply->data, reply.c_str(), m_reply->size);
+	shm_meta->send_message(to, m_reply, false);
+	free(m_reply);
+}
+
 void run_in(shm_message_queue *const shm, const std::string & out_name,
-		std::map<uint64_t, http_session_t *> *const sessions, std::mutex & sessions_lock)
+		std::map<uint64_t, http_session_t *> *const sessions, std::mutex & sessions_lock,
+		shm_message_queue *const shm_meta)
 {
 	while(!stop_flag) {
 		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
@@ -49,8 +64,52 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 		uint64_t session_id = 0;
 		memcpy(&session_id, m->data, sizeof(uint64_t));
 
-		std::unique_lock<std::mutex> lck(sessions_lock);
-		auto it = sessions->find(session_id);
+		DOLOG(logger::ll_debug, "Data for session %" PRIx64, session_id);
+
+		http_session_t *hs = nullptr;
+		{
+			std::unique_lock<std::mutex> lck(sessions_lock);
+			auto it = sessions->find(session_id);
+			if (it == sessions->end()) {
+				DOLOG(logger::ll_debug, "Session %" PRIx64 " not known - new session", session_id);
+				it = sessions->insert({ session_id, new http_session_t() }).first;
+			}
+
+			hs = it->second;
+		}
+
+		if (hs) {
+			if (m->size > 8) {
+				std::string temp(reinterpret_cast<const char *>(m->data + 8), m->size - 8);
+				hs->recv_buffer += temp;
+
+				size_t end_marker = hs->recv_buffer.find("\r\n\r\n");
+				if (end_marker == std::string::npos)
+					end_marker = hs->recv_buffer.find("\n\n");
+				if (end_marker != std::string::npos) {
+					DOLOG(logger::ll_debug, "Replying to HTTP request for %" PRIx64 " via %s", session_id, out_name.c_str());
+					const std::string http_payload = "Hello, world!";
+					const std::string http_headers = std::format("HTTP/1.0 200 All good sofar\r\nContent-Type: text/html\r\nContent-Size: {}\r\n\r\n", http_payload.size());
+					const std::string http_data = http_headers + http_payload;
+
+					shm_message_queue::message *http_reply = allocate_shm_message(8 + http_data.size());
+					memcpy(&http_reply->data[0], &session_id, 8);
+					memcpy(&http_reply->data[8], http_data.c_str(), http_reply->size - 8);
+
+					if (shm->send_message(out_name, http_reply, false) == false)
+						DOLOG(logger::ll_warning, "Cannot send to %s", out_name.c_str());
+
+					free(http_reply);
+
+					// send close
+//					const std::string close_msg = std::format("session-id={0:x}", session_id) + "\naction=close";
+//					push_meta_reply(shm_meta, m->sender, close_msg);
+				}
+			}
+		}
+		else {
+			DOLOG(logger::ll_warning, "HTTP session %" PRIx64 " not found", session_id);
+		}
 
 		// TODO
 
@@ -58,22 +117,10 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 	}
 }
 
-void push_meta_reply(shm_message_queue *const shm_meta, const std::string & to, const std::string & reply, const uint64_t msg_nr)
-{
-	DOLOG(logger::ll_debug, "Pushing reply \"%s\" to \"%s\" (id: %" PRIu64 ")", reply.c_str(), to.c_str(), msg_nr);
-
-	shm_message_queue::message *m_reply = allocate_shm_message(reply.size());
-	m_reply->type   = shm_message_queue::msg_reply;
-	m_reply->msg_nr = msg_nr;
-	memcpy(m_reply->data, reply.c_str(), m_reply->size);
-	shm_meta->send_message(to, m_reply, false);
-	free(m_reply);
-}
-
 void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, http_session_t *> *const sessions, std::mutex & sessions_lock)
 {
 	while(!stop_flag) {
-		shm_message_queue::message *m = shm_meta->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
+		shm_message_queue::message *m = shm_meta->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
 		if (!m)
 			continue;
 
@@ -105,7 +152,7 @@ void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, http_session
 				}
 			}
 			else if (parts[0] == "session-id") {
-				session_id = my_stoi_hex(parts[1]);
+				session_id = my_stoull_hex(parts[1]);
 			}
 			else {
 				DOLOG(logger::ll_error, "Invalid command (%s)", kv.c_str());
@@ -115,13 +162,23 @@ void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, http_session
 		}
 
 		if (invalid) {
+			DOLOG(logger::ll_warning, "Ignoring invalid shm command");
 		}
 		else if (action == open) {
-			std::unique_lock<std::mutex> lck(sessions_lock);
-			sessions->insert({ session_id.value(), new http_session_t() });
-			// TODO check for duplicates?
+			DOLOG(logger::ll_debug, "\"open\" for %" PRIx64 " received", session_id.value());
+
+			{
+				std::unique_lock<std::mutex> lck(sessions_lock);
+				auto it = sessions->find(session_id.value());
+				if (it == sessions->end())
+					sessions->insert({ session_id.value(), new http_session_t() });
+			}
+
+			push_meta_reply(shm_meta, m->sender, "action=pull");
 		}
 		else if (action == close) {
+			DOLOG(logger::ll_debug, "\"close\" for %" PRIx64 " received", session_id.value());
+
 			std::unique_lock<std::mutex> lck(sessions_lock);
 			auto it = sessions->find(session_id.value());
 			if (it != sessions->end()) {
@@ -132,6 +189,9 @@ void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, http_session
 				DOLOG(logger::ll_warning, "Session %" PRIx64 " already gone", session_id.value());
 			}
 		}
+		else {
+			DOLOG(logger::ll_warning, "Unexpected state");
+		}
 
 		free(m);
 	}
@@ -141,7 +201,7 @@ void run(shm_message_queue *const shm, const std::string & out_name,
 		shm_message_queue *const shm_meta,
 		std::map<uint64_t, http_session_t *> *const sessions, std::mutex & sessions_lock)
 {
-	std::thread rx  ([&] { run_in  (shm, out_name, sessions, sessions_lock); });
+	std::thread rx  ([&] { run_in  (shm, out_name, sessions, sessions_lock, shm_meta); });
 	std::thread meta([&] { run_meta(shm_meta, sessions, sessions_lock     ); });
 	meta.join();
 	rx.join();
