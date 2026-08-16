@@ -405,11 +405,6 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"name\" under \"global\" missing\n");
 		return 1;
 	}
-	std::string cfg_name = iniparser_getstring(d, "global:cfg-name",  "");
-	if (cfg_name.empty()) {
-		fprintf(stderr, "\"cfg-name\" under \"global\" missing\n");
-		return 1;
-	}
 	std::string out_name = iniparser_getstring(d, "global:out-name",  "");
 	if (out_name.empty()) {
 		fprintf(stderr, "\"out-name\" under \"global\" missing\n");
