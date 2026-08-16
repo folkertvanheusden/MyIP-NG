@@ -368,6 +368,8 @@ void run(shm_message_queue *const shm,
 	 const std::string & out_name,
 	 std::map<addr_ip4, addr_mac, addr> *arp_cache, std::mutex & arp_cache_lock)
 {
+	DOLOG(logger::ll_debug, "Starting processing");
+
 	std::thread res([&] { run_resolver(shm_resolver, requests, requests_lock, ip4_addr, mac_addr, out_name, shm, arp_cache, arp_cache_lock); });
 	std::thread rx ([&] { run_in(shm, mac_addr, ip4_addr, requests, requests_lock, shm_resolver, arp_cache, arp_cache_lock); });
 	rx.join();
