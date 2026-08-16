@@ -457,7 +457,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				}
 
 				if (ok) {
-					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 ", data sent to client", session_id);
+					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 ", data sent to L7", session_id);
 					if (send_tcp_packet(shm, out_name,
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
@@ -530,8 +530,8 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 {
 	set_thread_name("run_out");
 
-        DOLOG(logger::ll_debug, "INF) waiting for packets (client->TCP) on shm %s", shm->get_local_identifier().c_str());
-        DOLOG(logger::ll_debug, "INF) sending packets to %s (TCP->IP) via shm-name %s", out_name.c_str(), shm_out->get_local_identifier().c_str());
+        DOLOG(logger::ll_debug, "INF) waiting for packets (L7->TCP) on shm \"%s\"", shm->get_local_identifier().c_str());
+        DOLOG(logger::ll_debug, "INF) sending packets to \"%s\" (TCP->IP) via shm-name \"%s\"", out_name.c_str(), shm_out->get_local_identifier().c_str());
 
 	std::map<uint64_t, std::vector<shm_message_queue::message *> > payloads;
 	std::mutex              payload_lock;
@@ -578,13 +578,15 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 
 					// TODO handle peer window size
 
-					DOLOG(logger::ll_debug, "INF) TCP sent packet to %s for session %" PRIx64, out_name.c_str(), target.first);
+					DOLOG(logger::ll_debug, "INF) TCP sent packet to %s for session %" PRIx64 " (%d bytes)",
+							out_name.c_str(), target.first, pl_size);
 					if (send_tcp_packet(shm_out, out_name,
 								session->local_addr, session->peer_addr,
 								session->local_port, session->peer_port,
 								session->local_seq,  session->peer_seq,
 								FLAG_ACK | FLAG_PSH, session->local_window_size,
 								{ &item->data[8], pl_size }) == false) {
+						// do not free or erase item here, will be retried later
 						break;
 					}
 
@@ -612,7 +614,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 	});
 
 	while(!stop_flag) {
-		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
+		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
 		if (!m)
 			continue;
 
@@ -626,7 +628,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 		uint64_t session_id = 0;
 		memcpy(&session_id, m->data, 8);
 
-		DOLOG(logger::ll_debug, "INF) TCP outbound for %" PRIx64 " received", session_id);
+		DOLOG(logger::ll_debug, "INF) received from L7 for %" PRIx64, session_id);
 
 		// TODO max size & session time out
 
