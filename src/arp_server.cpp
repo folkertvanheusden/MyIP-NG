@@ -74,6 +74,7 @@ void run_resolver(shm_message_queue *const shm_resolver, std::vector<request> *c
 
 		if (parts[0] == "search-mac") {  // search MAC by IP4
 			r.ip4 = addr_ip4(parts[1], ".", false);
+			SPA   = ip4_addr;
 			TPA   = r.ip4.value();
 
 			// if me, return right away
