@@ -130,14 +130,15 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 			auto length = ftell(fh);
 			fseek(fh, 0, SEEK_SET);
 
+			long offset = 0;
 			if (send_http_header(session_id, shm, out_name, 200, length, false, "Ok!")) {
 				DOLOG(logger::ll_debug, "Headers sent for %" PRIx64, session_id);
-				while(length > 0) {
+				while(length > 0 && !stop_flag) {
 					shm_message_queue::message *http_reply = allocate_shm_message(12 + 512);
 					memcpy(&http_reply->data[0], &session_id, 8);
 
 					auto n = fread(&http_reply->data[12], 1, 512, fh);
-					DOLOG(logger::ll_debug, "Sending %zu bytes from offset %lu to %" PRIx64, session_id);
+					DOLOG(logger::ll_debug, "Sending %zu bytes offset %lu, to %" PRIx64, n, offset, session_id);
 					uint32_t flags = n < 512 ? 1 : 0;  // send FIN in-line
 					memcpy(&http_reply->data[8], &flags, 4);
 					http_reply->size = 12 + n;
@@ -151,6 +152,7 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 					free(http_reply);
 
 					length -= n;
+					offset += n;
 				}
 			}
 
