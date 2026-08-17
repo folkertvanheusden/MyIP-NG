@@ -42,7 +42,7 @@ void abort_session(const uint64_t session_id, http_session_t *const hs, shm_mess
 	uint32_t flags = 1;
 	memcpy(&abort_msg->data[8], &flags, 4);
 
-	if (shm->send_message(out_name, abort_msg, false) == false)
+	if (shm->send_message(out_name, abort_msg, true) == false)
 		DOLOG(logger::ll_warning, "Cannot send to %s", out_name.c_str());
 
 	free(abort_msg);
@@ -60,7 +60,7 @@ bool send_http_header(const uint64_t session_id, shm_message_queue *const shm, c
 	memcpy(&http_reply->data[8], &flags, 4);
 	memcpy(&http_reply->data[12], http_headers.c_str(), http_reply->size - 12);
 
-	bool rc = shm->send_message(out_name, http_reply, false);
+	bool rc = shm->send_message(out_name, http_reply, true);
 	if (rc == false)
 		DOLOG(logger::ll_warning, "Cannot send HTTP headers to %s", out_name.c_str());
 
@@ -109,19 +109,18 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 
 	if (url == "/") {
 		const std::string http_payload = "Hello, world!";
-		const std::string http_headers = std::format("HTTP/1.0 200 All good sofar\r\nContent-Type: text/html\r\nContent-Size: {}\r\n\r\n", http_payload.size());
-		const std::string http_data = http_headers + http_payload;
+		if (send_http_header(session_id, shm, out_name, 200, http_payload.size(), false, "Ok!")) {
+			shm_message_queue::message *http_reply = allocate_shm_message(12 + http_payload.size());
+			memcpy(&http_reply->data[0], &session_id, 8);
+			uint32_t flags = 1;  // send FIN in-line
+			memcpy(&http_reply->data[8], &flags, 4);
+			memcpy(&http_reply->data[12], http_payload.c_str(), http_reply->size - 12);
 
-		shm_message_queue::message *http_reply = allocate_shm_message(12 + http_data.size());
-		memcpy(&http_reply->data[0], &session_id, 8);
-		uint32_t flags = 1;  // send FIN in-line
-		memcpy(&http_reply->data[8], &flags, 4);
-		memcpy(&http_reply->data[12], http_data.c_str(), http_reply->size - 12);
+			if (shm->send_message(out_name, http_reply, true) == false)
+				DOLOG(logger::ll_warning, "Cannot send to %s", out_name.c_str());
 
-		if (shm->send_message(out_name, http_reply, false) == false)
-			DOLOG(logger::ll_warning, "Cannot send to %s", out_name.c_str());
-
-		free(http_reply);
+			free(http_reply);
+		}
 	}
 	else if (url == "/video.mp4") {
 		FILE *fh = fopen("/home/folkert/video_2026-08-07_17-37-35.mp4", "r");
@@ -171,7 +170,7 @@ void push_meta_reply(shm_message_queue *const shm_meta, const std::string & to, 
 	shm_message_queue::message *m_reply = allocate_shm_message(reply.size());
 	m_reply->type   = shm_message_queue::msg_reply;
 	memcpy(m_reply->data, reply.c_str(), m_reply->size);
-	shm_meta->send_message(to, m_reply, false);
+	shm_meta->send_message(to, m_reply, true);
 	free(m_reply);
 }
 
