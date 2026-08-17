@@ -19,6 +19,7 @@ extern "C" {
 #include "utils/gen.h"
 #include "utils/log.h"
 #include "utils/net.h"
+#include "utils/queue.h"
 #include "utils/random.h"
 #include "utils/shm.h"
 #include "utils/shm_message.h"
@@ -37,6 +38,18 @@ extern "C" {
 
 enum tcp_state_t { listen, syn_sent, syn_received, established, fin_wait_1, fin_wait_2, close_wait, closing, last_ack, time_wait, closed };
 
+struct tcp_data
+{
+	uint64_t ts;
+	uint8_t *p;
+	size_t   len;
+};
+
+void tcp_data_free_function(tcp_data & p)
+{
+	delete [] p.p;
+}
+
 struct session_t {
 	bool        is_client;
 	char        shm_peer[max_id_length];  // only valid for is_client == true
@@ -53,6 +66,9 @@ struct session_t {
 	uint16_t    local_port;
 	addr        peer_addr;
 	uint16_t    peer_port;
+
+	queue<tcp_data, tcp_data_free_function> tcp_to_l7 { std::make_pair(1000, true), { }, 1000 };
+	queue<tcp_data, tcp_data_free_function> l7_to_tcp { std::make_pair(1000, true), { }, 1000 };
 };
 
 std::atomic_bool stop_flag { false };
