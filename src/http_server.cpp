@@ -219,7 +219,6 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 
 				size_t end_marker = hs->recv_buffer.find("\r\n\r\n");
 				if (end_marker != std::string::npos || (flags & 1 /* FIN */)) {
-					// TODO in a thread as it may take a while (relatively) -> maar dan moet de sessi
 					std::thread handler([&] {
 							set_thread_name("http_handler");
 							process_http_request(session_id, hs, shm, out_name);
@@ -304,7 +303,6 @@ void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, http_session
 					sessions->insert({ session_id.value(), new http_session_t() });
 			}
 
-			push_meta_reply(shm_meta, m->sender, "action=pull");
 		}
 		else if (action == close) {
 			DOLOG(logger::ll_debug, "\"close\" for %" PRIx64 " received", session_id.value());
@@ -325,6 +323,8 @@ void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, http_session
 
 		free(m);
 	}
+
+	DOLOG(logger::ll_warning, "HTTP meta handler stopping");
 }
 
 void run(shm_message_queue *const shm, const std::string & out_name,
