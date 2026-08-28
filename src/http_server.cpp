@@ -122,40 +122,24 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 			free(http_reply);
 		}
 	}
-	else if (url == "/video.mp4") {
-		FILE *fh = fopen("/home/folkert/video_2026-08-07_17-37-35.mp4", "r");
-		if (fh) {  // TODO: get mtu size and/or get IP4 to fragment
-			fseek(fh, 0, SEEK_END);
-			auto length = ftell(fh);
-			fseek(fh, 0, SEEK_SET);
+	else if (url == "/10MB.dat") {
+		constexpr const int length = 10 * 1024 * 1024;
+		if (send_http_header(session_id, shm, out_name, 200, length, false, "Ok!")) {
+			for(int i=0; i<length / 1024; i++) {
+				DOLOG(logger::ll_debug, "%d/1024", i + 1);
+				shm_message_queue::message *http_reply = allocate_shm_message(12 + 1024);
+				memset(&http_reply->data[12], 0x00, http_reply->size - 12);
 
-			long offset = 0;
-			if (send_http_header(session_id, shm, out_name, 200, length, false, "Ok!")) {
-				DOLOG(logger::ll_debug, "Headers sent for %" PRIx64, session_id);
-				while(length > 0 && !stop_flag) {
-					shm_message_queue::message *http_reply = allocate_shm_message(12 + 512);
-					memcpy(&http_reply->data[0], &session_id, 8);
+				memcpy(&http_reply->data[0], &session_id, 8);
 
-					auto n = fread(&http_reply->data[12], 1, 512, fh);
-					DOLOG(logger::ll_debug, "Sending %zu bytes offset %lu, to %" PRIx64, n, offset, session_id);
-					uint32_t flags = n < 512 ? 1 : 0;  // send FIN in-line
-					memcpy(&http_reply->data[8], &flags, 4);
-					http_reply->size = 12 + n;
+				uint32_t flags = 1;
+				memcpy(&http_reply->data[8], &flags, 4);
 
-					if (shm->send_message(out_name, http_reply, true) == false) {
-						DOLOG(logger::ll_warning, "Cannot send to %s", out_name.c_str());
-						free(http_reply);
-						break;
-					}
+				if (shm->send_message(out_name, http_reply, true) == false)
+					DOLOG(logger::ll_warning, "Cannot send to %s", out_name.c_str());
 
-					free(http_reply);
-
-					length -= n;
-					offset += n;
-				}
+				free(http_reply);
 			}
-
-			fclose(fh);
 		}
 	}
 	else {
