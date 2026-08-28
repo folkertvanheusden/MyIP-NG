@@ -4,6 +4,7 @@
 #include <cinttypes>
 #include <condition_variable>
 #include <csignal>
+#include <cstring>
 #include <map>
 #include <shared_mutex>
 #include <thread>
@@ -36,13 +37,52 @@ extern "C" {
 #define FLAG_SYN (1 << 1)
 #define FLAG_FIN (1 << 0)
 
+#define INITIAL_LOCAL_WINDOW_SIZE 49152
+
 enum tcp_state_t { listen, syn_sent, syn_received, established, fin_wait_1, fin_wait_2, close_wait, closing, last_ack, time_wait, closed };
 
 struct tcp_data
 {
-	uint64_t ts;
-	uint8_t *p;
-	size_t   len;
+	std::condition_variable cv_in;
+	std::condition_variable cv_out;
+	std::mutex lock;
+	uint32_t   tcp_sequence_nr { };
+	uint64_t   ts              { };
+	uint8_t   *p               { };
+	size_t     len             { };
+
+	virtual ~tcp_data() {
+		free(p);
+	}
+
+	// when (re-)transmitting, to retrieve data
+	void peek(const size_t max_n_bytes, uint8_t *const target, size_t *const get_n) {
+		std::unique_lock<std::mutex> lck(lock);
+		*get_n = std::min(len, max_n_bytes);
+		if (*get_n > 0)
+			memcpy(target, p, *get_n);
+	}
+
+	// used when data is acked
+	void forget(const size_t n_bytes) {
+		std::unique_lock<std::mutex> lck(lock);
+		assert(n_bytes <= len);
+		size_t n_left = len - n_bytes;
+		if (n_left > 0) {
+			memmove(&p[0], &p[n_bytes], n_left);
+			len             -= n_bytes;
+			tcp_sequence_nr += n_bytes;
+		}
+		cv_out.notify_all();
+	}
+
+	void add(const uint8_t *const what, const size_t n_bytes) {
+		std::unique_lock<std::mutex> lck(lock);
+		p = reinterpret_cast<uint8_t *>(realloc(p, len + n_bytes));
+		memcpy(&p[len], what, n_bytes);
+		len += n_bytes;
+		cv_in.notify_all();
+	}
 };
 
 void tcp_data_free_function(tcp_data & p)
@@ -67,8 +107,12 @@ struct session_t {
 	addr        peer_addr;
 	uint16_t    peer_port;
 
-	queue<tcp_data, tcp_data_free_function> tcp_to_l7 { std::make_pair(1000, true), { }, 1000 };
-	queue<tcp_data, tcp_data_free_function> l7_to_tcp { std::make_pair(1000, true), { }, 1000 };
+	bool        half_closed;
+
+	tcp_data    tcp_to_l7;
+	tcp_data    l7_to_tcp;
+	bool        l7_send_fin;  // L7 wants to end session
+	size_t      in_flight;  // limitted by local_window_size
 };
 
 std::atomic_bool stop_flag { false };
@@ -379,12 +423,21 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						session->local_seq++;
 					}
 
-					// TODO handle half closed sessions
-
-					clean_session = true;
+					session->half_closed = true;
 				}
-				else {
-					// TODO
+				else {  // ack of pending data
+					uint32_t ack_n = ack_seq_nr - session->local_seq;
+					if (ack_seq_nr >= session->local_seq && ack_n <= session->in_flight) {
+						DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ack %u bytes",
+								session_id, ack_n);
+						session->l7_to_tcp.forget(ack_n);
+						session->local_seq += ack_n;
+					}
+					else {
+						DOLOG(logger::ll_debug, "ERR) Session %" PRIx64 " ack out of range",
+								session_id);
+						session->in_flight = 0;  // resend
+					}
 				}
 			}
 			else {  // start of new session
@@ -430,7 +483,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						new_session->peer_seq          = peer_seq_nr;
 						new_session->peer_addr         = a_from;
 						new_session->peer_port         = source_port;
-						new_session->local_window_size = 512;  // TODO
+						new_session->local_window_size = INITIAL_LOCAL_WINDOW_SIZE;
 						memset(new_session->shm_peer, 0x00, max_id_length);  // data channel
 						memcpy(new_session->shm_peer, temp[0].c_str(), temp[0].size());
 
@@ -541,84 +594,47 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 {
 	set_thread_name("run_out");
 
+	std::condition_variable_any payload_cv;
+
         DOLOG(logger::ll_debug, "INF) waiting for packets (L7->TCP) on shm \"%s\"", shm->get_local_identifier().c_str());
         DOLOG(logger::ll_debug, "INF) sending packets to \"%s\" (TCP->IP) via shm-name \"%s\"", out_name.c_str(), shm_out->get_local_identifier().c_str());
 
-	std::map<uint64_t, std::vector<shm_message_queue::message *> > payloads;
-	std::mutex              payload_lock;
-	std::condition_variable payload_cv;
-
 	std::thread sender([&] {
 		set_thread_name("run_out::sender");
-		std::unique_lock<std::mutex> lck(payload_lock);
+		std::unique_lock<std::shared_mutex> lck(sessions_lock);
 
 		while(!stop_flag) {
-			if (payload_cv.wait_for(lck, std::chrono::milliseconds(SLEEP_INTERVAL_MS)) == std::cv_status::timeout)
-				continue;
-
-			std::vector<uint64_t> forget;
-
-			for(auto & target: payloads) {
-				session_t *session = nullptr;
-				std::shared_lock<std::shared_mutex> lck(sessions_lock);
-				auto it = sessions->find(target.first);
-				if (it != sessions->end())
-					session = it->second;
-
-				if (session == nullptr) {
-					DOLOG(logger::ll_warning, "WRN) TCP session not found for %" PRIx64, target.first);
-					for(auto & item: target.second)
-						free(item);
-					forget.push_back(target.first);
+			for(auto & session: *sessions) {
+				if (session.second->in_flight != 0)
 					continue;
-				}
 
-				if (session)
-					DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", local seq nr: %s",
-							target.first, seq_delta_lcl(session).c_str());
+				DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", local seq nr: %s",
+					session.first, seq_delta_lcl(session.second).c_str());
 
+				uint8_t buffer[INITIAL_LOCAL_WINDOW_SIZE];
 
-				int n = 0;
-				while(target.second.empty() == false) {
-					auto item    = target.second.front();
-					int  pl_size = item->size - 12;
+				size_t got_n = 0;
+				session.second->l7_to_tcp.peek(sizeof buffer, buffer, &got_n);
+				bool send_fin = session.second->l7_send_fin;
+				session.second->in_flight = got_n;
 
-					uint32_t flags = 0;
-					memcpy(&flags, &item->data[8], 4);
-					bool send_fin = flags & 1;
+				DOLOG(logger::ll_debug,
+						"INF) TCP sent packet to %s for session %" PRIx64 " (%d bytes)",
+						out_name.c_str(), session.first, got_n);
 
-					// TODO handle peer window size
-
-					DOLOG(logger::ll_debug, "INF) TCP sent packet to %s for session %" PRIx64 " (%d bytes)",
-							out_name.c_str(), target.first, pl_size);
-					if (send_tcp_packet(shm_out, out_name,
-								session->local_addr, session->peer_addr,
-								session->local_port, session->peer_port,
-								session->local_seq,  session->peer_seq,
-								(send_fin ? FLAG_FIN : 0) | FLAG_ACK | FLAG_PSH, session->local_window_size,
-								{ &item->data[12], pl_size }) == false) {
-						// do not free or erase item here, will be retried later
-						break;
-					}
-
-					session->local_seq += pl_size + send_fin;
-
-					free(item);
-					target.second.erase(target.second.begin() + 0);
-					n++;
-				}
-
-				if (n)
-					DOLOG(logger::ll_debug, "INF) TCP sent %d item(s) for session %" PRIx64, n, target.first);
-
-				if (target.second.empty()) {
-					DOLOG(logger::ll_debug, "INF) TCP queue for session %" PRIx64 " is empty", target.first);
-					forget.push_back(target.first);
+				if (send_tcp_packet(shm_out, out_name,
+							session.second->local_addr, session.second->peer_addr,
+							session.second->local_port, session.second->peer_port,
+							session.second->local_seq,  session.second->peer_seq,
+							(send_fin ? FLAG_FIN : 0) | FLAG_ACK | FLAG_PSH,
+							session.second->local_window_size,
+							{ buffer, got_n }) == false) {
+					// something is wrong, logged about by send_tcp_packet itself
+					break;
 				}
 			}
 
-			for(auto & id: forget)
-				payloads.erase(id);
+			payload_cv.wait_for(lck, std::chrono::milliseconds(SLEEP_INTERVAL_MS));
 		}
 	});
 
@@ -636,17 +652,32 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 		// unwrap
 		uint64_t session_id = 0;
 		memcpy(&session_id, m->data, 8);
+		uint32_t flags      = 0;
+		memcpy(&flags, &m->data[8], 4);
 
 		DOLOG(logger::ll_debug, "INF) received from L7 for %" PRIx64, session_id);
 
 		// TODO max size & session time out
 
 		{
-			std::unique_lock<std::mutex> lck(payload_lock);
-			auto rc = payloads.insert({ session_id, { } });
-			rc.first->second.push_back(m);
-			payload_cv.notify_all();
+			std::unique_lock<std::shared_mutex> lck(sessions_lock);
+			auto it = sessions->find(session_id);
+			if (it != sessions->end()) {
+				it->second->l7_to_tcp.add(&m->data[12], m->size - 12);
+				if (flags & 1)
+					it->second->l7_send_fin = true;
+				DOLOG(logger::ll_warning, "DBG) session %" PRIx64 ": send %u bytes%s",
+						session_id, m->size - 12, it->second->l7_send_fin ? " +FIN" : "");
+				payload_cv.notify_one();
+			}
+			else {
+				DOLOG(logger::ll_warning, "WRN) TCP session not found for %" PRIx64, session_id);
+				delete it->second;
+				sessions->erase(it);
+			}
 		}
+
+		free(m);
 	}
 
 	sender.join();
@@ -748,7 +779,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 					new_session->start_local_seq   = new_session->local_seq;
 					new_session->peer_seq          = 0;
 					new_session->start_peer_seq    = 0;
-					new_session->local_window_size = 512;  // TODO
+					new_session->local_window_size = INITIAL_LOCAL_WINDOW_SIZE;
 					new_session->local_addr        = from_addr;
 					new_session->local_port        = src_port;
 					new_session->peer_addr         = dst_addr.value();
