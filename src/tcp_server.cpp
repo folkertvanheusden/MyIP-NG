@@ -415,29 +415,19 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			if (session) {
 				if (flags & FLAG_FIN) {
 					session->peer_seq++;
-					if (send_tcp_packet(shm, out_name,
-							a_to, a_from,  // swapped: reply
-							destination_port, source_port,  // swapped: reply
-							session->local_seq, session->peer_seq,
-							FLAG_FIN | FLAG_ACK, window_size, { nullptr, 0 }) == true) {
-						session->local_seq++;
-					}
-
 					session->half_closed = true;
 				}
-				else {  // ack of pending data
-					uint32_t ack_n = ack_seq_nr - session->local_seq;
-					if (ack_seq_nr >= session->local_seq && ack_n <= session->in_flight) {
-						DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ack %u bytes",
-								session_id, ack_n);
-						session->l7_to_tcp.forget(ack_n);
-						session->local_seq += ack_n;
-					}
-					else {
-						DOLOG(logger::ll_debug, "ERR) Session %" PRIx64 " ack out of range",
-								session_id);
-						session->in_flight = 0;  // resend
-					}
+
+				// ack of pending data
+				uint32_t ack_n = ack_seq_nr - session->local_seq;
+				if (ack_seq_nr >= session->local_seq && ack_n <= session->in_flight) {
+					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ack %u bytes", session_id, ack_n);
+					session->l7_to_tcp.forget(ack_n);
+					session->local_seq += ack_n;
+				}
+				else {
+					DOLOG(logger::ll_debug, "ERR) Session %" PRIx64 " ack out of range", session_id);
+					session->in_flight = 0;  // resend
 				}
 			}
 			else {  // start of new session
@@ -506,7 +496,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			}
 		}
 		else {
-			DOLOG(logger::ll_debug, "ERR) Session %" PRIx64 " has an unexpected state", session_id);
+			DOLOG(logger::ll_debug, "ERR) Session %" PRIx64 " has an unexpected state - pl size: %d", session_id, tcp_pl_size);
 		}
 
 		// send data to other end (local shm peer)
@@ -514,11 +504,14 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			if (peer_seq_nr == session->peer_seq) {
 				bool ok = true;
 				if (tcp_pl_size > 0) {
-					shm_message_queue::message *m_session = allocate_shm_message(tcp_pl_size + 8);
+					shm_message_queue::message *m_session = allocate_shm_message(tcp_pl_size + 12);
 					m_session->type = shm_message_queue::msg_new;
 					assert(sizeof(session_id) == 8);
+					uint32_t flags_temp = session->half_closed ? 1 : 0;
+					assert(sizeof(flags_temp) == 4);
 					memcpy(&m_session->data[0], &session_id, sizeof session_id);
-					memcpy(&m_session->data[8], &pl[header_size], tcp_pl_size);
+					memcpy(&m_session->data[8], &flags_temp, sizeof flags_temp);
+					memcpy(&m_session->data[12], &pl[header_size], tcp_pl_size);
 					ok = shm->send_message(session->shm_peer, m_session, false);
 					free(m_session);
 				}
@@ -560,7 +553,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			}
 		}
 		else {
-			DOLOG(logger::ll_debug, "WRN) Packet for an not known session with id %" PRIx64, session_id);
+			DOLOG(logger::ll_debug, "WRN) Packet for a not known session with id %" PRIx64, session_id);
 		}
 
 		if (invalid || clean_session) {

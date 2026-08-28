@@ -169,16 +169,18 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 		if (!m)
 			continue;
 
-		if (m->size < 8) {
+		if (m->size < 12) {
 			DOLOG(logger::ll_error, "SHM message from %s too small (%zu bytes)", m->sender, m->size);
 			free(m);
 			continue;
 		}
 
 		uint64_t session_id = 0;
-		memcpy(&session_id, m->data, sizeof(uint64_t));
+		memcpy(&session_id, m->data, sizeof(session_id));
+		uint32_t flags = 0;
+		memcpy(&flags, &m->data[8], sizeof(flags));
 
-		DOLOG(logger::ll_debug, "Data for session %" PRIx64, session_id);
+		DOLOG(logger::ll_debug, "Data for session %" PRIx64 "%s", session_id, flags & 1 ? " +FIN": "");
 
 		http_session_t *hs = nullptr;
 		{
@@ -193,14 +195,14 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 		}
 
 		if (hs) {
-			if (m->size > 8) {
-				std::string temp(reinterpret_cast<const char *>(m->data + 8), m->size - 8);
+			if (m->size > 12) {
+				std::string temp(reinterpret_cast<const char *>(m->data + 12), m->size - 12);
 				hs->recv_buffer += temp;
 
 				bool finish = false;
 
 				size_t end_marker = hs->recv_buffer.find("\r\n\r\n");
-				if (end_marker != std::string::npos) {
+				if (end_marker != std::string::npos || (flags & 1 /* FIN */)) {
 					// TODO in a thread as it may take a while (relatively)
 					process_http_request(session_id, hs, shm, out_name);
 
