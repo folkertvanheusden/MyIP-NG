@@ -257,6 +257,8 @@ bool shm_message_queue::send_message(const std::string & remote_identifier, mess
 				break;
 			}
 
+			DOLOG(logger::ll_debug, "queue for \"%s\" full, waiting...", remote_identifier.c_str());
+
 			if (int err = pthread_cond_wait(&put_shm->condition_get, &put_shm->mutex); err != 0) {
 				DOLOG(logger::ll_error, "pthread_cond_wait failed: %s", strerror(err));
 				break;
