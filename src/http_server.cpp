@@ -52,7 +52,7 @@ bool send_http_header(const uint64_t session_id, shm_message_queue *const shm, c
 {
 	DOLOG(logger::ll_debug, "Sending HTTP %d code (\"%s\")", which, message.c_str());
 
-	const std::string http_headers = std::format("HTTP/1.0 {} {}\r\nContent-Type: text/html\r\nContent-Size: {}\r\n\r\n", which, message, payload_size);
+	const std::string http_headers = std::format("HTTP/1.0 {} {}\r\nServer: MyIP-NG HTTPd\r\nContent-Type: text/html\r\nContent-Size: {}\r\n\r\n", which, message, payload_size);
 
 	shm_message_queue::message *http_reply = allocate_shm_message(12 + http_headers.size());
 	memcpy(&http_reply->data[0], &session_id, 8);
