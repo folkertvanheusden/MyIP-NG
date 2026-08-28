@@ -164,7 +164,25 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 {
 	set_thread_name("run_in");
 
+	std::vector<uint64_t> finish_sessions;
+
 	while(!stop_flag) {
+		// finish_sessions
+		{
+			std::unique_lock<std::mutex> lck(sessions_lock);
+			for(auto & session_id: finish_sessions) {
+				auto it = sessions->find(session_id);
+				if (it == sessions->end())
+					DOLOG(logger::ll_error, "Internal error: session %" PRIx64 " not known", session_id);
+				else {
+					delete it->second;
+					sessions->erase(it);
+				}
+			}
+			finish_sessions.clear();
+		}
+
+		// process incoming data
 		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
 		if (!m)
 			continue;
@@ -199,29 +217,23 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 				std::string temp(reinterpret_cast<const char *>(m->data + 12), m->size - 12);
 				hs->recv_buffer += temp;
 
-				bool finish = false;
-
 				size_t end_marker = hs->recv_buffer.find("\r\n\r\n");
 				if (end_marker != std::string::npos || (flags & 1 /* FIN */)) {
-					// TODO in a thread as it may take a while (relatively)
-					process_http_request(session_id, hs, shm, out_name);
+					// TODO in a thread as it may take a while (relatively) -> maar dan moet de sessi
+					std::thread handler([&] {
+							set_thread_name("http_handler");
+							process_http_request(session_id, hs, shm, out_name);
 
-					finish = true;
+							std::unique_lock<std::mutex> lck(sessions_lock);
+							finish_sessions.push_back(session_id);
+						});
+					handler.detach();
 				}
 				else if (hs->recv_buffer.size() > 4096) {
 					abort_session(session_id, hs, shm, out_name);
-					finish = true;
-				}
 
-				if (finish) {
 					std::unique_lock<std::mutex> lck(sessions_lock);
-					auto it = sessions->find(session_id);
-					if (it == sessions->end())
-						DOLOG(logger::ll_error, "Internal error: session %" PRIx64 " not known", session_id);
-					else {
-						delete it->second;
-						sessions->erase(it);
-					}
+					finish_sessions.push_back(session_id);
 				}
 			}
 		}
