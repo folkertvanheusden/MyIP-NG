@@ -299,6 +299,8 @@ std::optional<uint64_t> start_resolve_by_ip4(shm_message_queue *const shm_resolv
 		return msg_nr;
 	}
 
+	DOLOG(logger::ll_debug, "Failed to start resolve");
+
 	free(res_req_msg);
 	return { };
 }
