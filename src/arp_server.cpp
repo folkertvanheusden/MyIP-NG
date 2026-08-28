@@ -26,6 +26,9 @@ void sig_handler(int sig)
 	stop_flag = true;
 }
 
+// request as a map: <hash, request>
+// so that a query for a certain address is not performed multiple times in parallel -> combine with cache?
+
 struct request {
 	// one must be set
 	std::optional<addr_mac> mac;
