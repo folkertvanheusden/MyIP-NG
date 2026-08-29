@@ -500,7 +500,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			}
 		}
 		else {
-			DOLOG(logger::ll_debug, "ERR) Session %" PRIx64 " has an unexpected state - pl size: %d, flags: 0x%02x", session_id, tcp_pl_size, flags);
+			DOLOG(logger::ll_debug, "ERR) Session %" PRIx64 " has an unexpected state - pl size: %d, flags: %s", session_id, tcp_pl_size, flags_to_str(flags).c_str());
 		}
 
 		// send data to other end (local shm peer)
