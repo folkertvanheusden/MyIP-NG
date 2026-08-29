@@ -43,8 +43,6 @@ enum tcp_state_t { listen, syn_sent, syn_received, established, fin_wait_1, fin_
 
 struct tcp_data
 {
-	std::condition_variable cv_in;
-	std::condition_variable cv_out;
 	std::mutex lock;
 	uint32_t   tcp_sequence_nr { };
 	uint64_t   ts              { };
@@ -74,7 +72,6 @@ struct tcp_data
 			len             -= n_bytes;
 			tcp_sequence_nr += n_bytes;
 		}
-		cv_out.notify_all();
 	}
 
 	void add(const uint8_t *const what, const size_t n_bytes) {
@@ -82,7 +79,6 @@ struct tcp_data
 		p = reinterpret_cast<uint8_t *>(realloc(p, len + n_bytes));
 		memcpy(&p[len], what, n_bytes);
 		len += n_bytes;
-		cv_in.notify_all();
 	}
 };
 
@@ -429,14 +425,17 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				DOLOG(logger::ll_debug, "DBG) Session %" PRIx64 " ACK ack_seq_nr: %u, local: %u, n: %u, in flight: %u",
 						session_id, ack_seq_nr, session->local_seq, ack_n, session->in_flight);
 				if (ack_seq_nr >= session->local_seq && ack_n <= session->in_flight) {
-					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ack %u bytes", session_id, ack_n);
+					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ACK %u bytes", session_id, ack_n);
 					session->l7_to_tcp.forget(ack_n);
 					session->local_seq += ack_n;
+					session->in_flight -= ack_n;
 				}
 				else {
-					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ack out of range");
-					session->in_flight = 0;  // resend, FIXME: trigger send thread
+					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ACK out of range");
+					session->in_flight = 0;  // resend
 				}
+
+				sessions_cv.notify_all();
 			}
 			else {  // start of new session
 				auto it = mappings_in.find(destination_port);
@@ -472,7 +471,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					// allocate session
 					if (failed == false) {
 						DOLOG(logger::ll_debug, "INF) server for TCP/%d notified of new session %" PRIx64, destination_port, session_id);
-						session_t *new_session = new session_t;
+						session_t *new_session = new session_t();
 						new_session->is_client         = false;
 						new_session->state             = established;
 						new_session->local_seq         = syn_cookie;
@@ -485,7 +484,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						memset(new_session->shm_peer, 0x00, max_id_length);  // data channel
 						memcpy(new_session->shm_peer, temp[0].c_str(), temp[0].size());
 
-						lck.unlock();
+						lck.unlock();  // FIXME
 						{
 							std::unique_lock<std::shared_mutex> lck_u(sessions_lock);
 							sessions->insert({ session_id, new_session });
@@ -575,7 +574,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			}
 
 			if (session) {
-				lck.unlock();
+				lck.unlock();  // FIXME
 				{
 					std::unique_lock<std::shared_mutex> lck(sessions_lock);
 					sessions->erase(session_id);
@@ -774,7 +773,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 
 				if (failed == false) {
 					uint64_t session_id = calc_session_id(dst_port.value(), src_port, dst_addr.value(), from_addr);
-					session_t *new_session = new session_t;
+					session_t *new_session = new session_t();
 					new_session->is_client         = true;
 					memset(new_session->shm_peer, 0x00, max_id_length);
 					memcpy(new_session->shm_peer, shm_data_address.value().c_str(), shm_data_address.value().size());
