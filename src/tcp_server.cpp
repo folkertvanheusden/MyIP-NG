@@ -424,14 +424,16 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 				// ack of pending data
 				uint32_t ack_n = ack_seq_nr - session->local_seq;
+				DOLOG(logger::ll_debug, "DBG) Session %" PRIx64 " ACK ack_seq_nr: %u, local: %u, n: %u, in flight: %u",
+						session_id, ack_seq_nr, session->local_seq, ack_n, session->in_flight);
 				if (ack_seq_nr >= session->local_seq && ack_n <= session->in_flight) {
 					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ack %u bytes", session_id, ack_n);
 					session->l7_to_tcp.forget(ack_n);
 					session->local_seq += ack_n;
 				}
 				else {
-					DOLOG(logger::ll_debug, "ERR) Session %" PRIx64 " ack out of range", session_id);
-					session->in_flight = 0;  // resend
+					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ack out of range");
+					session->in_flight = 0;  // resend, FIXME: trigger send thread
 				}
 			}
 			else {  // start of new session
@@ -628,6 +630,11 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 							{ buffer, got_n }) == false) {
 					// something is wrong, logged about by send_tcp_packet itself
 					break;
+				}
+
+				if (send_fin) {
+					session.second->local_seq++;
+					DOLOG(logger::ll_debug, "DBG) FIN: increase local sequence number to %u", session.second->local_seq);
 				}
 			}
 
