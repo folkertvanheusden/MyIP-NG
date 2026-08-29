@@ -668,7 +668,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 				it->second->l7_to_tcp.add(&m->data[12], m->size - 12);
 				if (flags & 1)
 					it->second->l7_send_fin = true;
-				DOLOG(logger::ll_warning, "DBG) session %" PRIx64 ": send %u bytes%s",
+				DOLOG(logger::ll_debug, "DBG) session %" PRIx64 ": send %u bytes%s",
 						session_id, m->size - 12, it->second->l7_send_fin ? " +FIN" : "");
 				sessions_cv.notify_one();
 			}
