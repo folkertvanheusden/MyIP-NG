@@ -228,6 +228,7 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 						});
 					handler.detach();
 				}
+				// what if this triggers when the processing thread is already/still running?
 				else if (hs->recv_buffer.size() > 4096) {
 					abort_session(session_id, hs, shm, out_name);
 
