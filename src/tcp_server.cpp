@@ -266,7 +266,7 @@ bool send_tcp_packet(shm_message_queue *const shm, const std::string & down,
 // ip -> tcp
 void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> & mappings_in, const std::string & icmp_error_name,
 	    const std::string & out_name,
-	    std::map<uint64_t, session_t *> *const sessions, std::shared_mutex & sessions_lock,
+	    std::map<uint64_t, session_t *> *const sessions, std::shared_mutex & sessions_lock, std::condition_variable_any & sessions_cv,
 	    const uint8_t syn_cookie_salt[16],
 	    shm_message_queue *const shm_meta)
 {
@@ -589,11 +589,9 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 // tcp -> ip
 void run_out(shm_message_queue *const shm, const std::string & out_name, shm_message_queue *const shm_out,
-	    std::map<uint64_t, session_t *> *const sessions, std::shared_mutex & sessions_lock)
+	    std::map<uint64_t, session_t *> *const sessions, std::shared_mutex & sessions_lock, std::condition_variable_any & sessions_cv)
 {
 	set_thread_name("run_out");
-
-	std::condition_variable_any payload_cv;
 
         DOLOG(logger::ll_debug, "INF) waiting for packets (L7->TCP) on shm \"%s\"", shm->get_local_identifier().c_str());
         DOLOG(logger::ll_debug, "INF) sending packets to \"%s\" (TCP->IP) via shm-name \"%s\"", out_name.c_str(), shm_out->get_local_identifier().c_str());
@@ -638,7 +636,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 				}
 			}
 
-			payload_cv.wait_for(lck, std::chrono::milliseconds(SLEEP_INTERVAL_MS));
+			sessions_cv.wait_for(lck, std::chrono::milliseconds(SLEEP_INTERVAL_MS));
 		}
 	});
 
@@ -672,7 +670,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 					it->second->l7_send_fin = true;
 				DOLOG(logger::ll_warning, "DBG) session %" PRIx64 ": send %u bytes%s",
 						session_id, m->size - 12, it->second->l7_send_fin ? " +FIN" : "");
-				payload_cv.notify_one();
+				sessions_cv.notify_one();
 			}
 			else {
 				DOLOG(logger::ll_warning, "WRN) TCP session not found for %" PRIx64, session_id);
@@ -874,13 +872,13 @@ void run(shm_message_queue *const shm, const std::string & out_name,
 	 const std::map<uint16_t, std::string> & mappings_in,
 	 shm_message_queue *const shm_upper,
 	 const std::string & icmp_error_name,
-	 std::map<uint64_t, session_t *> *const sessions, std::shared_mutex & sessions_lock,
+	 std::map<uint64_t, session_t *> *const sessions, std::shared_mutex & sessions_lock, std::condition_variable_any & sessions_cv,
 	 const uint8_t syn_cookie_salt[16],
 	 shm_message_queue *const shm_meta, const addr & local_addr)
 {
 	std::thread rx  ([&] { run_in  (shm, mappings_in, icmp_error_name, out_name,
-				sessions, sessions_lock, syn_cookie_salt, shm_meta); });
-	std::thread tx  ([&] { run_out (shm_upper, out_name, shm, sessions, sessions_lock); });
+				sessions, sessions_lock, sessions_cv, syn_cookie_salt, shm_meta); });
+	std::thread tx  ([&] { run_out (shm_upper, out_name, shm, sessions, sessions_lock, sessions_cv); });
 	std::thread meta([&] { run_meta(shm, out_name, local_addr, shm_meta, sessions, sessions_lock); });
 	meta.join();
 	tx  .join();
@@ -1019,7 +1017,8 @@ int main(int argc, char *argv[])
 		return 1;
 
 	std::map<uint64_t, session_t *> sessions;
-	std::shared_mutex sessions_lock;
+	std::shared_mutex           sessions_lock;
+	std::condition_variable_any sessions_cv;
 
 	uint8_t syn_cookie_salt[16];  // key size required by SipHAsh
 	my_random(syn_cookie_salt, sizeof syn_cookie_salt);
@@ -1028,7 +1027,7 @@ int main(int argc, char *argv[])
 	if (stop_flag)
 		return 1;
 
-	run(shm, out_name, mappings_in, shm_upper, icmp_error_name, &sessions, sessions_lock, syn_cookie_salt, shm_meta, send_addr);
+	run(shm, out_name, mappings_in, shm_upper, icmp_error_name, &sessions, sessions_lock, sessions_cv, syn_cookie_salt, shm_meta, send_addr);
 
 	delete shm_meta;
 	delete shm_upper;
