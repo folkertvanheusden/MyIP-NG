@@ -56,11 +56,12 @@ struct tcp_data
 	}
 
 	// when (re-)transmitting, to retrieve data
-	void peek(const size_t max_n_bytes, uint8_t *const target, size_t *const get_n) {
+	bool peek(const size_t max_n_bytes, uint8_t *const target, size_t *const get_n) {
 		std::unique_lock<std::mutex> lck(lock);
 		*get_n = std::min(len, max_n_bytes);
 		if (*get_n > 0)
 			memcpy(target, p, *get_n);
+		return len == *get_n;
 	}
 
 	// used when data is acked
@@ -611,8 +612,8 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 				uint8_t buffer[INITIAL_LOCAL_WINDOW_SIZE];
 
 				size_t got_n = 0;
-				session.second->l7_to_tcp.peek(sizeof buffer, buffer, &got_n);
-				bool send_fin = session.second->l7_send_fin;
+				bool end = session.second->l7_to_tcp.peek(sizeof buffer, buffer, &got_n);
+				bool send_fin = end ? session.second->l7_send_fin : false;
 				session.second->in_flight = got_n;
 
 				DOLOG(logger::ll_debug,
@@ -669,7 +670,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 				if (flags & 1)
 					it->second->l7_send_fin = true;
 				DOLOG(logger::ll_debug, "DBG) session %" PRIx64 ": send %u bytes%s",
-						session_id, m->size - 12, it->second->l7_send_fin ? " +FIN" : "");
+						session_id, m->size - 12, it->second->l7_send_fin ? " (FIN set)" : "");
 				sessions_cv.notify_one();
 			}
 			else {
