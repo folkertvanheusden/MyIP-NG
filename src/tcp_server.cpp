@@ -350,7 +350,11 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		bool invalid_inc_ack = false;  // set when a processing a SYN
 		bool clean_session   = false;
 
-		if (flags & FLAG_SYN) {
+		if (flags & FLAG_RST) {
+			clean_session = true;
+			DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ": RST by peer");
+		}
+		else if (flags & FLAG_SYN) {
 			invalid_inc_ack = true;
 			// either a SYN/ACK for a server or a client (client sessions
 			// always start with a session allocated)
@@ -496,7 +500,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			}
 		}
 		else {
-			DOLOG(logger::ll_debug, "ERR) Session %" PRIx64 " has an unexpected state - pl size: %d", session_id, tcp_pl_size);
+			DOLOG(logger::ll_debug, "ERR) Session %" PRIx64 " has an unexpected state - pl size: %d, flags: 0x%02x", session_id, tcp_pl_size, flags);
 		}
 
 		// send data to other end (local shm peer)
