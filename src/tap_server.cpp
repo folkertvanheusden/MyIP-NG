@@ -24,6 +24,7 @@
 #include "utils/shm.h"
 #include "utils/shm_message.h"
 #include "utils/stoi.h"
+#include "utils/str.h"
 
 
 std::atomic_bool stop_flag { false };
@@ -182,6 +183,8 @@ void run_in(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_ad
 				size,
 				buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5]);
 
+		DOLOG(logger::ll_trace, "fETH> %s", dump(buffer, size).c_str());
+
 		// for us? or broadcast/multicast?
 		if ((buffer[0] & 1) == 0 &&  // multicast
 		    memcmp(&buffer[0], mac_addr, 6) != 0 &&
@@ -267,6 +270,8 @@ void run_out(shm_message_queue *const shm, const int tap_fd, const uint8_t mac_a
 		packet[12] = it->second >> 8;
 		packet[13] = it->second;
 		memcpy(&packet[14], pl, pl_len);
+
+		DOLOG(logger::ll_trace, "tETH> %s", dump(packet, packet_length).c_str());
 
 		if (write(tap_fd, packet, packet_length) != ssize_t(packet_length)) {
 			DOLOG(logger::ll_debug, "Problem sending packet: %s", strerror(errno));
