@@ -122,7 +122,7 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 	else if (url[0] != '/')
 		url = "/" + url;
 
-	printf("%s\n", url.c_str());
+	DOLOG(logger::ll_info, "HTTP GET: %s", url.c_str());
 
 	std::string local_file = http_base_path + url;
 	int fd = open(local_file.c_str(), O_RDONLY);
