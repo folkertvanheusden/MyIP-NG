@@ -4,11 +4,13 @@
 #include <cinttypes>
 #include <csignal>
 #include <cstring>
+#include <fcntl.h>
 #include <map>
 #include <mutex>
 #include <thread>
 #include <arpa/inet.h>
 #include <iniparser/iniparser.h>
+#include <sys/stat.h>
 
 #include "common.h"
 #include "utils/addresses.h"
@@ -19,6 +21,8 @@
 #include "utils/shm_message.h"
 #include "utils/stoi.h"
 
+
+const std::string http_base_path = "./www";
 
 struct http_session_t
 {
@@ -107,44 +111,60 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 
 	DOLOG(logger::ll_debug, "Processing URL \"%s\"", url.c_str());
 
-	if (url == "/") {
-		const std::string http_payload = "Hello, world!";
-		if (send_http_header(session_id, shm, out_name, 200, http_payload.size(), false, "Ok!")) {
-			shm_message_queue::message *http_reply = allocate_shm_message(12 + http_payload.size());
+	// TODO: compare with canonical path (std::filesystem::canonical) instead
+	if (url.find("..") != std::string::npos || url.find("~") != std::string::npos) {
+		send_http_header(session_id, shm, out_name, 500, 0, true, "Invalid URL");
+		return;
+	}
+
+	if (url == "/")
+		url = "/index.html";
+	else if (url[0] != '/')
+		url = "/" + url;
+
+	printf("%s\n", url.c_str());
+
+	std::string local_file = http_base_path + url;
+	int fd = open(local_file.c_str(), O_RDONLY);
+	if (fd == -1) {
+		DOLOG(logger::ll_debug, "Cannot open local file \"%s\": %s", local_file.c_str(), strerror(errno));
+		send_http_header(session_id, shm, out_name, 404, 0, true, "Not found");
+		return;
+	}
+
+	struct stat st { };
+	if (fstat(fd, &st) == -1) {
+		close(fd);
+		DOLOG(logger::ll_debug, "Stat on \"%s\" failed: %s", local_file.c_str(), strerror(errno));
+		send_http_header(session_id, shm, out_name, 500, 0, true, "Unknown error");
+		return;
+	}
+
+	auto length { st.st_size };
+	if (send_http_header(session_id, shm, out_name, 200, length, false, "Ok!")) {
+		while(length > 0) {
+			auto chunk_size = std::min(length, 4096l);
+			DOLOG(logger::ll_debug, "Sending %lu bytes, %lu left", chunk_size, length);
+
+			shm_message_queue::message *http_reply = allocate_shm_message(12 + chunk_size);
+			if (int rc = read(fd, &http_reply->data[12], chunk_size); rc != chunk_size) {
+				DOLOG(logger::ll_debug, "Short read on \"%s\"", local_file.c_str());
+				break;
+			}
 			memcpy(&http_reply->data[0], &session_id, 8);
-			uint32_t flags = 1;  // send FIN in-line
+			uint32_t flags = length - chunk_size == 0 ? 1 : 0;
 			memcpy(&http_reply->data[8], &flags, 4);
-			memcpy(&http_reply->data[12], http_payload.c_str(), http_reply->size - 12);
 
 			if (shm->send_message(out_name, http_reply, true) == false)
 				DOLOG(logger::ll_warning, "Cannot send to %s", out_name.c_str());
 
 			free(http_reply);
+
+			length -= chunk_size;
 		}
 	}
-	else if (url == "/10MB.dat") {
-		constexpr const int length = 10 * 1024 * 1024;
-		if (send_http_header(session_id, shm, out_name, 200, length, false, "Ok!")) {
-			for(int i=0; i<length / 1024; i++) {
-				DOLOG(logger::ll_debug, "%d/1024", i + 1);
-				shm_message_queue::message *http_reply = allocate_shm_message(12 + 1024);
-				memset(&http_reply->data[12], 0x00, http_reply->size - 12);
 
-				memcpy(&http_reply->data[0], &session_id, 8);
-
-				uint32_t flags = 1;
-				memcpy(&http_reply->data[8], &flags, 4);
-
-				if (shm->send_message(out_name, http_reply, true) == false)
-					DOLOG(logger::ll_warning, "Cannot send to %s", out_name.c_str());
-
-				free(http_reply);
-			}
-		}
-	}
-	else {
-		send_http_header(session_id, shm, out_name, 404, 0, true, "Not found");
-	}
+	close(fd);
 }
 
 void push_meta_reply(shm_message_queue *const shm_meta, const std::string & to, const std::string & reply)
