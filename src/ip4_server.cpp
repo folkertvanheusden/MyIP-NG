@@ -443,10 +443,11 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 							addr(from, from_len).to_str('.', false).c_str(),
 							addr(to,   to_len  ).to_str('.', false).c_str());
 
-					// & ~7: make sure we stay on a multiple of 8 for the offset
 					uint16_t packets_id = 0;
 					my_random(&packets_id, sizeof packets_id);
-					const int use_mtu_size = mtu_size & ~7;
+					// & ~7: make sure we stay on a multiple of 8 for the offset
+					//  -20: IPv4 header size
+					const int use_mtu_size = (mtu_size - 20) & ~7;
 					size_t fragment_offset = 0;
 					while(fragment_offset < pl_len) {
 						size_t   current_fragment_size = std::min(size_t(use_mtu_size), pl_len - fragment_offset);
