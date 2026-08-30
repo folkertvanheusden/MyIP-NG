@@ -52,11 +52,11 @@ void abort_session(const uint64_t session_id, http_session_t *const hs, shm_mess
 	free(abort_msg);
 }
 
-bool send_http_header(const uint64_t session_id, shm_message_queue *const shm, const std::string & out_name, const int which, const size_t payload_size, const bool fin, const std::string & message)
+bool send_http_header(const uint64_t session_id, shm_message_queue *const shm, const std::string & out_name, const int which, const size_t payload_size, const bool fin, const std::string & message, const std::string & mime_type)
 {
 	DOLOG(logger::ll_debug, "Sending HTTP %d code (\"%s\")", which, message.c_str());
 
-	const std::string http_headers = std::format("HTTP/1.0 {} {}\r\nServer: MyIP-NG HTTPd\r\nContent-Type: text/html\r\nContent-Size: {}\r\n\r\n", which, message, payload_size);
+	const std::string http_headers = std::format("HTTP/1.0 {} {}\r\nServer: MyIP-NG HTTPd\r\nContent-Type: {}\r\nContent-Size: {}\r\n\r\n", which, message, mime_type, payload_size);
 
 	shm_message_queue::message *http_reply = allocate_shm_message(12 + http_headers.size());
 	memcpy(&http_reply->data[0], &session_id, 8);
@@ -84,7 +84,7 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 
 			auto parts = split(line, " ");
 			if (parts.size() != 3) {
-				send_http_header(session_id, shm, out_name, 405, 0, true, "Can't make cheese from your supposedly HTTP request");
+				send_http_header(session_id, shm, out_name, 405, 0, true, "Can't make cheese from your supposedly HTTP request", "text/html");
 				return;
 			}
 
@@ -98,14 +98,14 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 				url = url.substr(0, space);
 			}
 			else {
-				send_http_header(session_id, shm, out_name, 501, 0, true, "Only GET please");
+				send_http_header(session_id, shm, out_name, 501, 0, true, "Only GET please", "text/html");
 				return;
 			}
 		}
 	}
 
 	if (url.empty()) {
-		send_http_header(session_id, shm, out_name, 405, 0, true, "URL missing");
+		send_http_header(session_id, shm, out_name, 405, 0, true, "URL missing", "text/html");
 		return;
 	}
 
@@ -113,7 +113,7 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 
 	// TODO: compare with canonical path (std::filesystem::canonical) instead
 	if (url.find("..") != std::string::npos || url.find("~") != std::string::npos) {
-		send_http_header(session_id, shm, out_name, 500, 0, true, "Invalid URL");
+		send_http_header(session_id, shm, out_name, 500, 0, true, "Invalid URL", "text/html");
 		return;
 	}
 
@@ -128,7 +128,7 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 	int fd = open(local_file.c_str(), O_RDONLY);
 	if (fd == -1) {
 		DOLOG(logger::ll_debug, "Cannot open local file \"%s\": %s", local_file.c_str(), strerror(errno));
-		send_http_header(session_id, shm, out_name, 404, 0, true, "Not found");
+		send_http_header(session_id, shm, out_name, 404, 0, true, "Not found", "text/html");
 		return;
 	}
 
@@ -136,12 +136,26 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 	if (fstat(fd, &st) == -1) {
 		close(fd);
 		DOLOG(logger::ll_debug, "Stat on \"%s\" failed: %s", local_file.c_str(), strerror(errno));
-		send_http_header(session_id, shm, out_name, 500, 0, true, "Unknown error");
+		send_http_header(session_id, shm, out_name, 500, 0, true, "Unknown error", "text/html");
 		return;
 	}
 
+	std::string mime_type { "text/html" };
+	auto dot = url.rfind(".");
+	if (dot != std::string::npos) {
+		auto ext = url.substr(dot + 1);
+		if (ext == "css")
+			mime_type = "text/css";
+		else if (ext == "ico")
+			mime_type = "image/vnd.microsoft.icon";
+		else if (ext == "png")
+			mime_type = "image/png";
+		else
+			DOLOG(logger::ll_debug, "\"%s\" is an unkown file type", ext.c_str());
+	}
+
 	auto length { st.st_size };
-	if (send_http_header(session_id, shm, out_name, 200, length, false, "Ok!")) {
+	if (send_http_header(session_id, shm, out_name, 200, length, false, "Ok!", mime_type)) {
 		while(length > 0) {
 			auto chunk_size = std::min(length, 4096l);
 			DOLOG(logger::ll_debug, "Sending %lu bytes, %lu left", chunk_size, length);
