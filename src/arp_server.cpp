@@ -39,7 +39,7 @@ struct request {
 
 void push_resolver_reply(shm_message_queue *const shm_resolver, const std::string & to, const std::string & reply, const uint64_t msg_nr)
 {
-	DOLOG(logger::ll_debug, "Pushing reply \"%s\" to \"%s\"", reply.c_str(), to.c_str());
+	DOLOG(logger::ll_debug, "Pushing reply \"%s\" to \"%s\" (%" PRIu64 ")", reply.c_str(), to.c_str(), msg_nr);
 	shm_message_queue::message *m_reply = allocate_shm_message(reply.size());
 	m_reply->type   = shm_message_queue::msg_reply;
 	m_reply->msg_nr = msg_nr;
