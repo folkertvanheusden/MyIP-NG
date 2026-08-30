@@ -110,6 +110,7 @@ struct session_t {
 	tcp_data    l7_to_tcp;
 	bool        l7_send_fin;  // L7 wants to end session
 	size_t      in_flight;  // limitted by local_window_size
+	bool        fin_sent;
 };
 
 std::atomic_bool stop_flag { false };
@@ -433,6 +434,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				else {
 					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ACK out of range");
 					session->in_flight = 0;  // resend
+					session->fin_sent  = false;
 				}
 
 				sessions_cv.notify_all();
@@ -601,39 +603,42 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 		set_thread_name("run_out::sender");
 		std::unique_lock<std::shared_mutex> lck(sessions_lock);
 
+		uint8_t buffer[INITIAL_LOCAL_WINDOW_SIZE];
+
 		while(!stop_flag) {
 			for(auto & session: *sessions) {
-				if (session.second->in_flight != 0)
+				if (session.second->in_flight != 0 || session.second->fin_sent == true)
 					continue;
-
-				DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", local seq nr: %s",
-					session.first, seq_delta_lcl(session.second).c_str());
-
-				uint8_t buffer[INITIAL_LOCAL_WINDOW_SIZE];
 
 				size_t got_n = 0;
 				bool end = session.second->l7_to_tcp.peek(sizeof buffer, buffer, &got_n);
 				bool send_fin = end ? session.second->l7_send_fin : false;
 				session.second->in_flight = got_n;
+				session.second->fin_sent |= send_fin;
 
-				DOLOG(logger::ll_debug,
-						"INF) TCP sent packet to %s for session %" PRIx64 " (%d bytes%s)",
-						out_name.c_str(), session.first, got_n, send_fin ? " +FIN" : "");
+				if (got_n > 0 || send_fin) {
+					DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", local seq nr: %s",
+						session.first, seq_delta_lcl(session.second).c_str());
 
-				if (send_tcp_packet(shm_out, out_name,
-							session.second->local_addr, session.second->peer_addr,
-							session.second->local_port, session.second->peer_port,
-							session.second->local_seq,  session.second->peer_seq,
-							(send_fin ? FLAG_FIN : 0) | FLAG_ACK | FLAG_PSH,
-							session.second->local_window_size,
-							{ buffer, got_n }) == false) {
-					// something is wrong, logged about by send_tcp_packet itself
-					break;
-				}
+					DOLOG(logger::ll_debug,
+							"INF) TCP sent packet to %s for session %" PRIx64 " (%d bytes%s)",
+							out_name.c_str(), session.first, got_n, send_fin ? " +FIN" : "");
 
-				if (send_fin) {
-					session.second->local_seq++;
-					DOLOG(logger::ll_debug, "DBG) FIN: increase local sequence number to %u", session.second->local_seq);
+					if (send_tcp_packet(shm_out, out_name,
+								session.second->local_addr, session.second->peer_addr,
+								session.second->local_port, session.second->peer_port,
+								session.second->local_seq,  session.second->peer_seq,
+								(send_fin ? FLAG_FIN : 0) | FLAG_ACK | FLAG_PSH,
+								session.second->local_window_size,
+								{ buffer, got_n }) == false) {
+						     // something is wrong, logged about by send_tcp_packet itself
+						     break;
+					}
+
+					if (send_fin) {
+						session.second->local_seq++;
+						DOLOG(logger::ll_debug, "DBG) FIN: increase local sequence number to %u", session.second->local_seq);
+					}
 				}
 			}
 
