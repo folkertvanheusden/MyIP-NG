@@ -617,8 +617,8 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 				session.second->in_flight = got_n;
 
 				DOLOG(logger::ll_debug,
-						"INF) TCP sent packet to %s for session %" PRIx64 " (%d bytes)",
-						out_name.c_str(), session.first, got_n);
+						"INF) TCP sent packet to %s for session %" PRIx64 " (%d bytes%s)",
+						out_name.c_str(), session.first, got_n, send_fin ? " +FIN" : "");
 
 				if (send_tcp_packet(shm_out, out_name,
 							session.second->local_addr, session.second->peer_addr,
