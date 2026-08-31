@@ -5,6 +5,7 @@
 #include <cstring>
 #include <format>
 
+#include "log.h"
 #include "str.h"
 
 
@@ -26,13 +27,18 @@ struct addr {
 		auto parts = split(what, seperator);
 		a_len = parts.size();
 		a = new uint8_t[a_len];
-		if (is_hex) {
-			for(size_t i=0; i<a_len; i++)
-				a[i] = std::stoi(parts[i], nullptr, 16);
+		try {
+			if (is_hex) {
+				for(size_t i=0; i<a_len; i++)
+					a[i] = std::stoi(parts[i], nullptr, 16);
+			}
+			else {
+				for(size_t i=0; i<a_len; i++)
+					a[i] = std::stoi(parts[i]);
+			}
 		}
-		else {
-			for(size_t i=0; i<a_len; i++)
-				a[i] = std::stoi(parts[i]);
+		catch(const std::invalid_argument & ia) {
+			DOLOG(logger::ll_error, "Cannot convert string \"%s\" to a list of values: %s", what.c_str(), ia.what());
 		}
 	}
 

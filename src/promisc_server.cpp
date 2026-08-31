@@ -26,6 +26,7 @@
 #include "utils/log.h"
 #include "utils/shm.h"
 #include "utils/shm_message.h"
+#include "utils/stoi.h"
 
 
 struct prom_handle
@@ -229,12 +230,15 @@ void run_out(shm_message_queue *const shm, const prom_handle & ph, const std::ma
 		memcpy(&socket_address.sll_addr, ph.mac_addr, 6);
 
 		int rc = sendto(ph.fd, packet, packet_length, 0, reinterpret_cast<const sockaddr *>(&socket_address), sizeof socket_address);
-		if (rc == 0)
-			DOLOG(logger::ll_warning, "cannot access promisc device");
-		else if (rc == -1)
-			DOLOG(logger::ll_warning, "cannot access promisc device, reason: %s", strerror(errno));
-		else if (rc != ssize_t(packet_length))
-			DOLOG(logger::ll_warning, "frame truncated");
+		if (rc != ssize_t(packet_length)) {
+			DOLOG(logger::ll_debug, "Sending %zu bytes", packet_length);
+			if (rc == 0)
+				DOLOG(logger::ll_warning, "cannot access promisc device");
+			else if (rc == -1)
+				DOLOG(logger::ll_warning, "cannot access promisc device, reason: %s", strerror(errno));
+			else
+				DOLOG(logger::ll_warning, "frame truncated");
+		}
 
 		delete [] packet;
 	}

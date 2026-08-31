@@ -37,9 +37,11 @@ std::string dump(const uint8_t *const bytes, const size_t n)
 {
 	std::string out;
 	for(size_t i=0; i<n; i++) {
-		if (i)
-			out += " ";
-		out += std::format("{0:02x}", bytes[i]);
+		const char c = bytes[i];
+		out += std::format("{0:c}", char(c > 32 && c < 127 ? c : 32));
 	}
+	out += "|";
+	for(size_t i=0; i<n; i++)
+		out += std::format(" {0:02x}", bytes[i]);
 	return out;
 }

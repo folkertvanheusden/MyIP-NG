@@ -1,0 +1,4 @@
+build
+*.ini
+logfile.txt
+www/setup.svg

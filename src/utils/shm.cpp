@@ -194,6 +194,7 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 
 bool shm_message_queue::send_message(const std::string & remote_identifier, message *const m, const bool blocking)
 {
+	DOLOG(logger::ll_debug, "send %smessage to %s (from %s)", blocking ? "blocking ":"", remote_identifier.c_str(), local_identifier.c_str());
 	assert(m->size > 0);
 	int put_segment = shm_open(remote_identifier.c_str(), O_RDWR, 0600);
 	if (put_segment == -1) {
@@ -256,6 +257,8 @@ bool shm_message_queue::send_message(const std::string & remote_identifier, mess
 				DOLOG(logger::ll_warning, "queue for \"%s\" full, dropping message", remote_identifier.c_str());
 				break;
 			}
+
+			DOLOG(logger::ll_debug, "queue for \"%s\" full, waiting...", remote_identifier.c_str());
 
 			if (int err = pthread_cond_wait(&put_shm->condition_get, &put_shm->mutex); err != 0) {
 				DOLOG(logger::ll_error, "pthread_cond_wait failed: %s", strerror(err));

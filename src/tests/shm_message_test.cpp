@@ -8,6 +8,9 @@
 
 int main(int argc, char *argv[])
 {
+#if defined(NDEBUG)
+	printf("ASSERT IS DISABLED: NOT A DEBUG BUILD\n");
+#endif
 	log_.set_loglevel(logger::ll_debug);
 
 	{

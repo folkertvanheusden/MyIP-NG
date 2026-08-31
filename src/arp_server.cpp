@@ -26,6 +26,9 @@ void sig_handler(int sig)
 	stop_flag = true;
 }
 
+// request as a map: <hash, request>
+// so that a query for a certain address is not performed multiple times in parallel -> combine with cache?
+
 struct request {
 	// one must be set
 	std::optional<addr_mac> mac;
@@ -36,7 +39,7 @@ struct request {
 
 void push_resolver_reply(shm_message_queue *const shm_resolver, const std::string & to, const std::string & reply, const uint64_t msg_nr)
 {
-	DOLOG(logger::ll_debug, "Pushing reply \"%s\" to \"%s\"", reply.c_str(), to.c_str());
+	DOLOG(logger::ll_debug, "Pushing reply \"%s\" to \"%s\" (%" PRIu64 ")", reply.c_str(), to.c_str(), msg_nr);
 	shm_message_queue::message *m_reply = allocate_shm_message(reply.size());
 	m_reply->type   = shm_message_queue::msg_reply;
 	m_reply->msg_nr = msg_nr;
@@ -74,6 +77,7 @@ void run_resolver(shm_message_queue *const shm_resolver, std::vector<request> *c
 
 		if (parts[0] == "search-mac") {  // search MAC by IP4
 			r.ip4 = addr_ip4(parts[1], ".", false);
+			SPA   = ip4_addr;
 			TPA   = r.ip4.value();
 
 			// if me, return right away
@@ -314,7 +318,6 @@ std::optional<uint64_t> send_meta_request(shm_message_queue *const shm_meta, con
         return { };
 }
 
-
 std::pair<addr_mac, addr_ip4> cfg_runtime(shm_message_queue *const shm_meta,
 		const std::string & meta_name_Ethernet_server, const std::string & meta_name_ip4_server)
 {
@@ -369,6 +372,8 @@ void run(shm_message_queue *const shm,
 	 const std::string & out_name,
 	 std::map<addr_ip4, addr_mac, addr> *arp_cache, std::mutex & arp_cache_lock)
 {
+	DOLOG(logger::ll_debug, "Starting processing");
+
 	std::thread res([&] { run_resolver(shm_resolver, requests, requests_lock, ip4_addr, mac_addr, out_name, shm, arp_cache, arp_cache_lock); });
 	std::thread rx ([&] { run_in(shm, mac_addr, ip4_addr, requests, requests_lock, shm_resolver, arp_cache, arp_cache_lock); });
 	rx.join();
@@ -402,11 +407,6 @@ int main(int argc, char *argv[])
 	std::string name = iniparser_getstring(d, "global:name",  "");
 	if (name.empty()) {
 		fprintf(stderr, "\"name\" under \"global\" missing\n");
-		return 1;
-	}
-	std::string cfg_name = iniparser_getstring(d, "global:cfg-name",  "");
-	if (cfg_name.empty()) {
-		fprintf(stderr, "\"cfg-name\" under \"global\" missing\n");
 		return 1;
 	}
 	std::string out_name = iniparser_getstring(d, "global:out-name",  "");

@@ -6,6 +6,9 @@
 
 int main(int argc, char *argv[])
 {
+#if defined(NDEBUG)
+	printf("ASSERT IS DISABLED: NOT A DEBUG BUILD\n");
+#endif
 	addr a0("1.2.3.3", ".", false);
 	addr a1("1.2.3.4", ".", false);
 	addr a2("1.2.33.4", ".", true);

@@ -6,7 +6,7 @@
 
 uint16_t ip_checksum(const uint16_t *const p, const size_t n)
 {
-        uint32_t cksum = 0;
+	uint32_t cksum = 0;
 
         for(size_t i=0; i<n / 2; i++)
                 cksum += htons(p[i]);
@@ -16,30 +16,31 @@ uint16_t ip_checksum(const uint16_t *const p, const size_t n)
 	cksum = (cksum >> 16) + (cksum & 0xffff);
 	cksum += cksum >> 16;
 
-        return ~cksum;
+	return ~cksum;
 }
 
-// TODO optimize me
 uint16_t tcp_udp_checksum(const addr_ip4 & from, const addr_ip4 & to, const uint8_t *const p, const size_t n, const uint8_t protocol_number)
 {
-	uint8_t *temp = new uint8_t[12 + n * 2]();
+	uint32_t cksum = 0;
 
-	memcpy(&temp[0], from.get(), 4);
-	memcpy(&temp[4], to  .get(), 4);
-	temp[9]  = protocol_number;
-	temp[10] = n >> 8;
-	temp[11] = n;
-	memcpy(&temp[12], p, n);
+	const uint16_t *from16 = reinterpret_cast<const uint16_t *>(from.get());
+	cksum += htons(from16[0]);
+	cksum += htons(from16[1]);
+	const uint16_t *to16   = reinterpret_cast<const uint16_t *>(to.get());
+	cksum += htons(to16[0]);
+	cksum += htons(to16[1]);
+	cksum += protocol_number;
+	cksum += n;
 
-        uint32_t cksum = 0;
-        for(size_t i=0; i<n + 12 / 2; i++) 
-                cksum += htons(reinterpret_cast<const uint16_t *>(temp)[i]);
+	for(size_t i=0; i<n / 2; i++)
+		cksum += htons(reinterpret_cast<const uint16_t *>(p)[i]);
+	if (n & 1)
+		cksum += p[n - 1] << 8;
+
 	cksum = (cksum >> 16) + (cksum & 0xffff);
 	cksum += cksum >> 16;
 
-	free(temp);
-
-        return ~cksum;
+	return ~cksum;
 }
 
 uint64_t fletcher64(const uint8_t *const data, const size_t count)
@@ -53,12 +54,12 @@ uint64_t fletcher64(const uint8_t *const data, const size_t count)
                 sum2 = (sum2 + sum1     ) % UINT32_MAX;
         }
 
-        int extra = count & 3;
-        if (extra) {
-                size_t   offset = words * 4;
-                uint32_t temp   = 0;
-                for(int i=0; i<extra; i++)
-                        temp <<= 8, temp |= data[offset + i];
+	int extra = count & 3;
+	if (extra) {
+		size_t   offset = words * 4;
+		uint32_t temp   = 0;
+		for(int i=0; i<extra; i++)
+			temp <<= 8, temp |= data[offset + i];
 
                 sum1 = (sum1 + temp) % UINT32_MAX;
                 sum2 = (sum2 + sum1) % UINT32_MAX;

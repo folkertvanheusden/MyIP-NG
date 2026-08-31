@@ -21,6 +21,7 @@
 #include "utils/random.h"
 #include "utils/shm.h"
 #include "utils/shm_message.h"
+#include "utils/stoi.h"
 #include "utils/str.h"
 #include "utils/time.h"
 
@@ -51,7 +52,7 @@ void send_icmp_error(shm_message_queue *const shm, const std::string & icmp_erro
 	if (shm->send_message(icmp_error_name, wrapped, false) == false)
 		DOLOG(logger::ll_warning, "Cannot send ICMP message");
 	else
-		DOLOG(logger::ll_warning, "ICMP message type %d code %d queued", type, code);
+		DOLOG(logger::ll_debug, "ICMP message type %d code %d queued", type, code);
 
 	free(wrapped);
 }
@@ -283,6 +284,10 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 
 std::optional<uint64_t> start_resolve_by_ip4(shm_message_queue *const shm_resolver_replies, const std::string & resolver_name, const addr_ip4 & a)
 {
+	DOLOG(logger::ll_debug, "Resolve \"%s\" by \"%s\" via \"%s\"",
+			a.to_str('.', false).c_str(), resolver_name.c_str(),
+			shm_resolver_replies->get_local_identifier().c_str());
+
 	const std::string msg = std::format("search-mac={0}", a.to_str('.', false));
 
 	shm_message_queue::message *res_req_msg = allocate_shm_message(msg.size());
@@ -293,6 +298,8 @@ std::optional<uint64_t> start_resolve_by_ip4(shm_message_queue *const shm_resolv
 		free(res_req_msg);
 		return msg_nr;
 	}
+
+	DOLOG(logger::ll_debug, "Failed to start resolve");
 
 	free(res_req_msg);
 	return { };
@@ -354,11 +361,10 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 					free(it.second->queued_msg);
 					erase_keys.insert(it.second->from_nr);
 					erase_keys.insert(it.second->to_nr  );
+					DOLOG(logger::ll_debug, "Forgetting request-records (%" PRIu64 ", %" PRIu64 ")",
+							it.second->from_nr, it.second->to_nr);
 				}
 			}
-
-			if (erase_keys.empty() == false)
-				DOLOG(logger::ll_debug, "Forgetting %zu request-records", erase_keys.size());
 
 			for(auto & key: erase_keys)
 				pending_messages.erase(key);
@@ -378,7 +384,8 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 			std::unique_lock<std::mutex> lck(pending_messages_lock);
 			auto it = pending_messages.find(resolve_result->msg_nr);
 			if (it == pending_messages.end()) {
-				DOLOG(logger::ll_error, "Request-record for message from \"%s\" cannot be found", resolve_result->sender);
+				DOLOG(logger::ll_error, "Request-record %" PRIu64 " for message from \"%s\" cannot be found",
+						resolve_result->msg_nr, resolve_result->sender);
 				free(resolve_result);
 				continue;
 			}
@@ -399,7 +406,8 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 			else if (pending_msg_meta->to_nr == it->first)
 				pending_msg_meta->to   = resolve_result_addr;
 			else {
-				DOLOG(logger::ll_error, "Unexpected message number %" PRIu64 ", expected either %" PRIu64 " or %" PRIu64, it->first, pending_msg_meta->from_nr, pending_msg_meta->to_nr);
+				DOLOG(logger::ll_error, "Unexpected message number %" PRIu64 ", expected either %" PRIu64 " or %" PRIu64,
+						it->first, pending_msg_meta->from_nr, pending_msg_meta->to_nr);
 				pending_messages.erase(it);
 				free(resolve_result);
 				continue;
@@ -431,14 +439,18 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 					// goto should be an option here
 				}
 				else {
-					// & ~7: make sure we stay on a multiple of 8 for the offset
+					DOLOG(logger::ll_debug, "Sending IP4 fragment(s) for %s -> %s",
+							addr(from, from_len).to_str('.', false).c_str(),
+							addr(to,   to_len  ).to_str('.', false).c_str());
+
 					uint16_t packets_id = 0;
 					my_random(&packets_id, sizeof packets_id);
-					const int use_mtu_size = mtu_size & ~7;
-					size_t fragment_offset = 0;
+					// & ~7: make sure we stay on a multiple of 8 for the offset
+					//  -20: IPv4 header size
+					const int use_mtu_size    = (mtu_size - 20) & ~7;
+					size_t    fragment_offset = 0;
 					while(fragment_offset < pl_len) {
 						size_t   current_fragment_size = std::min(size_t(use_mtu_size), pl_len - fragment_offset);
-						printf("%zu %zu: %zu\n", fragment_offset, pl_len, current_fragment_size);
 						size_t   complete_msg_size = current_fragment_size + 20;  // 20 = IP4 header size
 						uint8_t *complete_msg      = new uint8_t[complete_msg_size]();
 						uint8_t *header            = complete_msg;
@@ -473,12 +485,15 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 								{ });
 
 						// SEND via shm[link_name] 
-						if (shm->send_message(link_name, wrapped, false) == false)
-							DOLOG(logger::ll_debug, "Failed to place packet in shared memory");
+						bool rc = shm->send_message(link_name, wrapped, false);
 
 						free(wrapped);
-
 						delete [] complete_msg;
+
+						if (rc == false) {
+							DOLOG(logger::ll_debug, "Failed to place packet in shared memory");
+							break;
+						}
 
 						fragment_offset += current_fragment_size;
 					}
@@ -517,35 +532,40 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 			continue;
 		}
 
-		// start resolve of from/to MAC addresses
-		auto from_msg_nr = start_resolve_by_ip4(shm_resolver_replies, resolver_name, addr_ip4(from, 4));
-
-		uint32_t to_word = (to[0] << 24) | (to[1] << 16) | (to[2] << 8) | to[3];
-		addr_ip4 via     = addr_ip4(to, 4);
-		if ((to_word & masks[listen_addr.second]) != listen_cidr_word) {
-			DOLOG(logger::ll_debug, "Route %s via %s", via.to_str('.', false).c_str(), default_gw_addr.to_str('.', false).c_str());
-			via = default_gw_addr;
-		}
-
-		auto to_msg_nr   = start_resolve_by_ip4(shm_resolver_replies, resolver_name, via);
-
-		// if the resolve-actions-start succeeded, queue the
-		// message for fill-in & send
-		if (from_msg_nr.has_value() && to_msg_nr.has_value())
+		// TODO get rid of this large locking-range
+		// the problem is that the pending_message must be known before the resolve-results can be processed
 		{
-			auto         now = get_us();
-			pending_msg *pm  = new pending_msg { now, m, from_msg_nr.value(), { }, to_msg_nr.value(), { } };
 			std::unique_lock<std::mutex> lck(pending_messages_lock);
-			pending_messages.insert({ from_msg_nr.value(), pm });
-			pending_messages.insert({ to_msg_nr  .value(), pm });
-			// NO free of 'm'! it is 'moved' to pending_messages!
-			DOLOG(logger::ll_debug, "IP4 packet (OUT) from %s to %s queued for processing",
-					addr(from, from_len).to_str('.', false).c_str(),
-					addr(to,   to_len  ).to_str('.', false).c_str());
-		}
-		else {
-			DOLOG(logger::ll_warning, "Could not start resolve of either from and/or to");
-			free(m);
+			// start resolve of from/to MAC addresses
+			auto from_msg_nr = start_resolve_by_ip4(shm_resolver_replies, resolver_name, addr_ip4(from, 4));
+
+			uint32_t to_word = (to[0] << 24) | (to[1] << 16) | (to[2] << 8) | to[3];
+			addr_ip4 via     = addr_ip4(to, 4);
+			if ((to_word & masks[listen_addr.second]) != listen_cidr_word) {
+				DOLOG(logger::ll_debug, "Route %s via %s", via.to_str('.', false).c_str(), default_gw_addr.to_str('.', false).c_str());
+				via = default_gw_addr;
+			}
+
+			auto to_msg_nr   = start_resolve_by_ip4(shm_resolver_replies, resolver_name, via);
+
+			// if the resolve-actions-start succeeded, queue the
+			// message for fill-in & send
+			if (from_msg_nr.has_value() && to_msg_nr.has_value())
+			{
+				auto         now = get_us();
+				pending_msg *pm  = new pending_msg { now, m, from_msg_nr.value(), { }, to_msg_nr.value(), { } };
+				pending_messages.insert({ from_msg_nr.value(), pm });
+				pending_messages.insert({ to_msg_nr  .value(), pm });
+				// NO free of 'm'! it is 'moved' to pending_messages!
+				DOLOG(logger::ll_debug, "IP4 packet (OUT) from %s to %s queued for processing (%" PRIu64 ", %" PRIu64 ")",
+						addr(from, from_len).to_str('.', false).c_str(),
+						addr(to,   to_len  ).to_str('.', false).c_str(),
+						from_msg_nr.value(), to_msg_nr.value());
+			}
+			else {
+				DOLOG(logger::ll_warning, "Could not start resolve of either from and/or to");
+				free(m);
+			}
 		}
 	}
 
@@ -575,7 +595,7 @@ void run_meta(shm_message_queue *const shm_meta, const addr_ip4 & ip4)
 		std::string kv(reinterpret_cast<const char *>(m->data), m->size);
 		auto parts = split(kv, "=");
 
-		DOLOG(logger::ll_debug, "Processing \"%s\"", kv.c_str());
+		DOLOG(logger::ll_debug, "Processing \"%s\" in msg %" PRIu64 " from \"%s\"", kv.c_str(), m->msg_nr, m->sender);
 
 		if (parts[0] == "get-ip4") {  // retrieve IP4 address
 			auto reply = "ip4=" + ip4.to_str('.', false);
@@ -626,9 +646,11 @@ void load_mappings(std::map<uint8_t, std::string> *const mappings_in, std::map<s
 			fprintf(stderr, "Mapping \"%s\" is invalid\n", keys[i]);
 			exit(1);
 		}
-		uint16_t    k   = std::stoi(col + 1);
-		mappings_in ->insert({ k, v });
-		mappings_out->insert({ v, k });
+		auto k = my_stoi_dec(col + 1);
+		if (k.has_value() == false)
+			exit(1);
+		mappings_in ->insert({ k.value(), v });
+		mappings_out->insert({ v, k.value() });
 	}
 
 	delete [] keys;
@@ -717,7 +739,9 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"listen-addr\": CIDR missing\n");
 		return 1;
 	}
-	int cidr = std::stoi(listen_addr_str.substr(slash + 1));
+	auto cidr = my_stoi_dec(listen_addr_str.substr(slash + 1));
+	if (cidr.has_value() == false)
+		return 1;
 	addr_ip4 listen_addr(listen_addr_str.substr(0, slash), ".", false);
 	std::map<uint8_t, std::string> mappings_in;
 	std::map<std::string, uint8_t> mappings_out;
@@ -742,7 +766,7 @@ int main(int argc, char *argv[])
 	if (shm_meta == nullptr)
 		return 1;
 
-	run(shm, { listen_addr, cidr }, default_gw_addr, mappings_in, mappings_out,
+	run(shm, { listen_addr, cidr.value() }, default_gw_addr, mappings_in, mappings_out,
             icmp_error_name, out_name, shm_resolver_replies, resolver_name, shm_upper_in,
 	    mtu_size,
 	    shm_meta);

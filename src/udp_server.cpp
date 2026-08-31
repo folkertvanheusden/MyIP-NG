@@ -14,6 +14,7 @@
 #include "utils/net.h"
 #include "utils/shm.h"
 #include "utils/shm_message.h"
+#include "utils/stoi.h"
 
 
 std::atomic_bool stop_flag { false };
@@ -39,7 +40,7 @@ void send_icmp_error(shm_message_queue *const shm, const std::string & icmp_erro
 	if (shm->send_message(icmp_error_name, wrapped, false) == false)
 		DOLOG(logger::ll_warning, "Cannot send ICMP message");
 	else
-		DOLOG(logger::ll_warning, "ICMP message type %d code %d queued", type, code);
+		DOLOG(logger::ll_debug, "ICMP message type %d code %d queued", type, code);
 
 	free(wrapped);
 }
@@ -159,7 +160,8 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 		udp_packet[5] = udp_packet_len;
 		udp_packet[6] = 0;
 		udp_packet[7] = 0;
-		memcpy(&udp_packet[8], &pl[4], pl_len - 4);
+		memcpy(&udp_packet[8], &pl[4], pl_len - 4);  // skip the portnumbers
+		assert((udp_packet_len & 1) == 0);
 		uint16_t checksum = tcp_udp_checksum(addr_ip4(from, from_len), addr_ip4(to, to_len), udp_packet, udp_packet_len, 17);
 		udp_packet[6] = checksum >> 8;
 		udp_packet[7] = checksum;

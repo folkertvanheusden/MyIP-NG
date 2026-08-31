@@ -1,3 +1,5 @@
+#pragma once
+
 #include <cerrno>
 #include <cstring>
 #include <string>
@@ -9,7 +11,7 @@ public:
 	enum loglevel_t { ll_trace, ll_debug, ll_info, ll_warning, ll_error, ll_fatal };
 
 private:
-	loglevel_t  ll       { ll_debug      };
+	loglevel_t  ll       { ll_trace      };
 	std::string log_file { "logfile.txt" };
 
 public:
@@ -34,3 +36,5 @@ extern logger log_;
         if (ll >= log_.get_loglevel())  \
                 log_.dolog(ll, __FILE__, __builtin_extract_return_addr(__builtin_return_address(0)), __FUNCTION__, fmt, ##__VA_ARGS__);   \
         } while(0)
+
+void set_thread_name(std::string name);
