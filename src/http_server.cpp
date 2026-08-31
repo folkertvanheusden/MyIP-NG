@@ -150,6 +150,8 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 			mime_type = "image/vnd.microsoft.icon";
 		else if (ext == "png")
 			mime_type = "image/png";
+		else if (ext == "jpg")
+			mime_type = "image/jpeg";
 		else if (ext == "svg")
 			mime_type = "image/svg+xml";
 		else
