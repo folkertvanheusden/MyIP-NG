@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.9.4)
+cmake_minimum_required(VERSION 3.15)
 
 project(MyIP-NG3 VERSION 0.1)
 
@@ -7,8 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 add_definitions("-D_FILE_OFFSET_BITS=64")
 
-#set(CMAKE_BUILD_TYPE RelWithDebInfo)
-set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_BUILD_TYPE RelWithDebInfo)
+#set(CMAKE_BUILD_TYPE Debug)
 
 add_compile_options(-Wall)
 
@@ -112,11 +112,12 @@ add_executable(http_server
 	src/http_server.cpp
 	)
 
-add_custom_target(graphviz ALL
-    COMMAND ${CMAKE_COMMAND} "--graphviz=docs/setup.gv" .
-    COMMAND dot -Tsvg docs/setup.gv -o ${CMAKE_SOURCE_DIR}/www/setup.svg
-    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+add_custom_command(OUTPUT ${CMAKE_SOURCE_DIR}/www/setup.svg
+    COMMAND dot -Tsvg ${CMAKE_SOURCE_DIR}/docs/setup.gv -o ${CMAKE_SOURCE_DIR}/www/setup.svg
+    DEPENDS ${CMAKE_SOURCE_DIR}/docs/setup.gv
 )
+add_custom_target(svg_file ALL
+	DEPENDS ${CMAKE_SOURCE_DIR}/www/setup.svg)
 
 target_link_libraries(addresses_test log)
 target_link_libraries(arp_server shm log misc)
