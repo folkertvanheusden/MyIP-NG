@@ -680,7 +680,6 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 			}
 			else {
 				DOLOG(logger::ll_warning, "WRN) TCP session not found for %" PRIx64, session_id);
-				delete it->second;
 				sessions->erase(it);
 			}
 		}
