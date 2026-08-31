@@ -26,7 +26,7 @@ digraph myip_ng {
 	"tap/promiscuous_server" [
 		color="#88000022"
 		label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
-			<tr><td>TAP/promiscuous_server</td></tr>
+			<tr><td port="name">TAP/promiscuous_server</td></tr>
 			<tr><td>Link/network access layer</td></tr>
 			<tr><td>Runs partially as root</td></tr>
 		</table>>
@@ -35,7 +35,7 @@ digraph myip_ng {
 	"arp_server" [
 		fillcolor="#00ff8822"
 		label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
-			<tr><td>arp_server</td></tr>
+			<tr><td port="name">arp_server</td></tr>
 			<tr><td>Internet layer</td></tr>
 		</table>>
 		shape=plain
@@ -43,7 +43,7 @@ digraph myip_ng {
 	"ip4_server" [
 		fillcolor="#00ff8822"
 		label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
-			<tr><td>ip4_server</td></tr>
+			<tr><td port="name">ip4_server</td></tr>
 			<tr><td>Internet layer</td></tr>
 		</table>>
 		shape=plain
@@ -51,7 +51,7 @@ digraph myip_ng {
 	"icmp_server" [
 		fillcolor="#00ff8822"
 		label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
-			<tr><td>icmp_server</td></tr>
+			<tr><td port="name">icmp_server</td></tr>
 			<tr><td>Internet layer</td></tr>
 		</table>>
 		shape=plain
@@ -59,7 +59,7 @@ digraph myip_ng {
 	"tcp_server" [
 		fillcolor="#8800ff22"
 		label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
-			<tr><td>tcp_server</td></tr>
+			<tr><td port="name">tcp_server</td></tr>
 			<tr><td>Transport layer</td></tr>
 		</table>>
 		shape=plain
@@ -67,7 +67,7 @@ digraph myip_ng {
 	"udp_server" [
 		fillcolor="#8800ff22"
 		label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
-			<tr><td>udp_server</td></tr>
+			<tr><td port="name">udp_server</td></tr>
 			<tr><td>Transport layer</td></tr>
 		</table>>
 		shape=plain
@@ -75,7 +75,7 @@ digraph myip_ng {
 	"ntp_server" [
 		fillcolor="#ff880022"
 		label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
-			<tr><td>ntp_server</td></tr>
+			<tr><td port="name">ntp_server</td></tr>
 			<tr><td>Application layer</td></tr>
 		</table>>
 		shape=plain
@@ -83,20 +83,20 @@ digraph myip_ng {
 	"http_server" [
 		fillcolor="#ff880022"
 		label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
-			<tr><td>http_server</td></tr>
+			<tr><td port="name">http_server</td></tr>
 			<tr><td>Application layer</td></tr>
 		</table>>
 		shape=plain
 	]
-	"tap/promiscuous_server" -> "ip4_server";
-	"tap/promiscuous_server" -> "arp_server";
-	"ip4_server" -> "arp_server";
-	"ip4_server" -> "icmp_server";
-	"icmp_server" -> "ip4_server" ;
-	"ip4_server" -> "tcp_server";
-	"ip4_server" -> "udp_server";
-	"tcp_server" -> "icmp_server";
-	"tcp_server" -> "http_server";
-	"udp_server" -> "icmp_server";
-	"udp_server" -> "ntp_server";
+	"tap/promiscuous_server":name -> "ip4_server":name;
+	"tap/promiscuous_server":name -> "arp_server":name;
+	"ip4_server":name -> "arp_server":name;
+	"ip4_server":name -> "icmp_server":name;
+	"icmp_server":name -> "ip4_server":name;
+	"ip4_server":name -> "tcp_server":name;
+	"ip4_server":name -> "udp_server":name;
+	"tcp_server":name -> "icmp_server":name;
+	"tcp_server":name -> "http_server":name;
+	"udp_server":name -> "icmp_server":name;
+	"udp_server":name -> "ntp_server":name;
 }
