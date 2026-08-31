@@ -112,6 +112,12 @@ add_executable(http_server
 	src/http_server.cpp
 	)
 
+add_custom_target(graphviz ALL
+    COMMAND ${CMAKE_COMMAND} "--graphviz=docs/setup.gv" .
+    COMMAND dot -Tsvg docs/setup.gv -o ${CMAKE_SOURCE_DIR}/www/setup.svg
+    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 target_link_libraries(addresses_test log)
 target_link_libraries(arp_server shm log misc)
 target_link_libraries(arp_test shm log)
