@@ -447,8 +447,8 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 					my_random(&packets_id, sizeof packets_id);
 					// & ~7: make sure we stay on a multiple of 8 for the offset
 					//  -20: IPv4 header size
-					const int use_mtu_size = (mtu_size - 20) & ~7;
-					size_t fragment_offset = 0;
+					const int use_mtu_size    = (mtu_size - 20) & ~7;
+					size_t    fragment_offset = 0;
 					while(fragment_offset < pl_len) {
 						size_t   current_fragment_size = std::min(size_t(use_mtu_size), pl_len - fragment_offset);
 						size_t   complete_msg_size = current_fragment_size + 20;  // 20 = IP4 header size
@@ -483,12 +483,15 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 								{ });
 
 						// SEND via shm[link_name] 
-						if (shm->send_message(link_name, wrapped, false) == false)
-							DOLOG(logger::ll_debug, "Failed to place packet in shared memory");
+						bool rc = shm->send_message(link_name, wrapped, false);
 
 						free(wrapped);
-
 						delete [] complete_msg;
+
+						if (rc == false) {
+							DOLOG(logger::ll_debug, "Failed to place packet in shared memory");
+							break;
+						}
 
 						fragment_offset += current_fragment_size;
 					}
