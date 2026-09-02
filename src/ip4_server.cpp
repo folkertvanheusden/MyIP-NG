@@ -672,7 +672,6 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	log_.set_loglevel(logger::ll_trace);  // TODO configurable
 	DOLOG(logger::ll_info, "IP4 server starting...");
 
 	dictionary *d = iniparser_load(cfg_file.c_str());
