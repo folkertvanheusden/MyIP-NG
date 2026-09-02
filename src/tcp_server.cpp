@@ -424,7 +424,8 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				}
 
 				// ack of pending data
-				uint32_t ack_n = ack_seq_nr - session->local_seq;
+				bool     resend = false;
+				uint32_t ack_n  = ack_seq_nr - session->local_seq;
 				DOLOG(logger::ll_debug, "DBG) Session %" PRIx64 " ACK ack_seq_nr: %u, local: %u, n: %u, in flight: %u",
 						session_id, ack_seq_nr, session->local_seq, ack_n, session->in_flight);
 				if (ack_seq_nr >= session->local_seq && ack_n <= session->in_flight) {
@@ -435,6 +436,15 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				}
 				else {
 					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ACK out of range");
+					resend = true;
+				}
+
+				if ((flags & FLAG_FIN) && session->in_flight > 0) {
+					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " FIN received with unacked data, resending");
+					resend = true;
+				}
+
+				if (resend) {
 					session->in_flight = 0;  // resend
 					session->fin_sent  = false;
 				}
@@ -682,7 +692,6 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 			}
 			else {
 				DOLOG(logger::ll_warning, "WRN) TCP session not found for %" PRIx64, session_id);
-				sessions->erase(it);
 			}
 		}
 
