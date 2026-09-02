@@ -337,6 +337,8 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			session = it->second;
 
 		if (session) {
+			session->peer_window_size = window_size;
+
 			DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", local seq nr: %s, ack seq nr: %s",
 					session_id, seq_delta_lcl(session).c_str(), seq_delta_lcl(session, ack_seq_nr).c_str());
 			DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", expected peer seq nr: %s, recv peer seq nr: %s",
