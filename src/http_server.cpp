@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 
 #include "common.h"
+#include "tcp.h"
 #include "utils/addresses.h"
 #include "utils/gen.h"
 #include "utils/log.h"
@@ -26,10 +27,18 @@ const std::string http_base_path = "./www";
 
 struct http_session_t
 {
+	const addr_ip4   from;
+	const uint16_t   from_port;
+	const addr_ip4   to;
+	const uint16_t   to_port;
 	std::atomic_bool processing { };
 	std::string      recv_buffer;
 
-	http_session_t() {
+	http_session_t(const addr_ip4 from, const uint16_t from_port,
+		       const addr_ip4 to,   const uint16_t to_port):
+		from(from), from_port(from_port),
+		to  (to  ), to_port  (to_port  )
+	{
 	}
 };
 
@@ -141,12 +150,14 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 		return;
 	}
 
-	std::string mime_type { "text/html" };
+	std::string mime_type { "text/plain" };
 	auto dot = url.rfind(".");
 	if (dot != std::string::npos) {
 		auto ext = url.substr(dot + 1);
 		if (ext == "css")
 			mime_type = "text/css";
+		else if (ext == "html" || ext == "htm")
+			mime_type = "text/html";
 		else if (ext == "ico")
 			mime_type = "image/vnd.microsoft.icon";
 		else if (ext == "png")
@@ -222,44 +233,68 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 		}
 
 		// process incoming data
-		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
+		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
 		if (!m)
 			continue;
 
-		if (m->size < 12) {
-			DOLOG(logger::ll_error, "SHM message from %s too small (%zu bytes)", m->sender, m->size);
-			free(m);
-			continue;
+		uint64_t       session_id   = 0;
+                size_t         from_len     = 0;
+		uint16_t       from_port    = 0;
+                size_t         to_len       = 0;
+		uint16_t       to_port      = 0;
+                size_t         pl_len       = 0;
+		uint32_t       flags        = 0;
+                const uint8_t *from         = nullptr;
+                const uint8_t *to           = nullptr;
+                const uint8_t *pl           = nullptr;
+		if (unwrap_message_up_tcp(
+				m,
+				&session_id,
+				&from_len, &from,
+				&from_port,
+				&to_len, &to,
+				&to_port,
+				&flags,
+				&pl_len, &pl) == false) {
+                        DOLOG(logger::ll_error, "ERR) Corrupt message in shared memory segment!");
+                        free(m);
+                        continue; 
 		}
 
-		uint64_t session_id = 0;
-		memcpy(&session_id, m->data, sizeof(session_id));
-		uint32_t flags = 0;
-		memcpy(&flags, &m->data[8], sizeof(flags));
-
-		DOLOG(logger::ll_debug, "Data for session %" PRIx64 "%s", session_id, flags & 1 ? " +FIN": "");
+		DOLOG(logger::ll_debug, "Data for session %" PRIx64 "%s", session_id, flags & MI_TCP_FIN ? " +FIN": "");
 
 		http_session_t *hs = nullptr;
 		{
 			std::unique_lock<std::mutex> lck(sessions_lock);
 			auto it = sessions->find(session_id);
 			if (it == sessions->end()) {
-				DOLOG(logger::ll_debug, "Session %" PRIx64 " not known - new session", session_id);
-				it = sessions->insert({ session_id, new http_session_t() }).first;
+				if (flags & MI_TCP_OPEN) {
+					DOLOG(logger::ll_debug, "Session %" PRIx64 " not known - new session", session_id);
+					auto *session = new http_session_t(
+							addr_ip4(from, from_len), from_port,
+							addr_ip4(to, to_len), to_port);
+					it = sessions->insert({ session_id, session }).first;
+				}
+				// TODO MI_TCP_CLOSE
+				else {
+					DOLOG(logger::ll_debug, "Session %" PRIx64 " not known");
+					free(m);
+					continue;
+				}
 			}
 
 			hs = it->second;
 		}
 
 		if (hs && hs->processing == false) {
-			if (m->size > 12) {
-				std::string temp(reinterpret_cast<const char *>(m->data + 12), m->size - 12);
+			if (pl_len > 0) {
+				std::string temp(reinterpret_cast<const char *>(pl), pl_len);
 				hs->recv_buffer += temp;
 
 				size_t end_marker = hs->recv_buffer.find("\r\n\r\n");
 				if (end_marker != std::string::npos || (flags & 1 /* FIN */)) {
 					hs->processing = true;
-					std::thread handler([&] {
+					std::thread handler([session_id, hs, shm, out_name, &sessions_lock, &finish_sessions] {
 							set_thread_name("http_handler");
 							process_http_request(session_id, hs, shm, out_name);
 
@@ -301,7 +336,7 @@ void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, http_session
 			continue;
 		}
 
-		enum { open, close }    action  = close;
+		enum { close }          action  = close;
 		std::optional<uint64_t> session_id;
 		bool                    invalid = false;
 
@@ -310,9 +345,7 @@ void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, http_session
 			DOLOG(logger::ll_debug, "Processing \"%s\"", line.c_str());
 
 			if (parts[0] == "action") {
-				if (parts[1] == "open")
-					action = open;
-				else if (parts[1] == "close")
+				if (parts[1] == "close")
 					action = close;
 				else {
 					DOLOG(logger::ll_error, "ERR) TCP meta: invalid action \"%s\"", parts[1].c_str());
@@ -332,17 +365,6 @@ void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, http_session
 
 		if (invalid) {
 			DOLOG(logger::ll_warning, "Ignoring invalid shm command");
-		}
-		else if (action == open) {
-			DOLOG(logger::ll_debug, "\"open\" for %" PRIx64 " received", session_id.value());
-
-			{
-				std::unique_lock<std::mutex> lck(sessions_lock);
-				auto it = sessions->find(session_id.value());
-				if (it == sessions->end())
-					sessions->insert({ session_id.value(), new http_session_t() });
-			}
-
 		}
 		else if (action == close) {
 			DOLOG(logger::ll_debug, "\"close\" for %" PRIx64 " received", session_id.value());

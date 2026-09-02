@@ -15,6 +15,7 @@ extern "C" {
 #include "3dparty/SipHash/siphash.h"
 }
 #include "common.h"
+#include "tcp.h"
 #include "utils/addresses.h"
 #include "utils/checksum.h"
 #include "utils/gen.h"
@@ -452,7 +453,6 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				sessions_cv.notify_all();
 			}
 			else {  // start of new session
-				auto it = mappings_in.find(destination_port);
 				// as this is a response to a SYN(+ACK), increase local sequence number
 				uint32_t syn_cookie = my_syn_cookie(session_id, syn_cookie_salt) + 1;
 				if (syn_cookie != ack_seq_nr) {
@@ -463,28 +463,21 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 							syn_cookie, peer_seq_nr,
 							FLAG_RST, window_size, { nullptr, 0 });
 				}
-				else if (it != mappings_in.end()) {  // TODO
+				else if (auto it = mappings_in.find(destination_port); it != mappings_in.end()) {
 					// send 'open' to shm server
-					auto        temp   = split(it->second, ",");
-					bool        failed = false;
-					std::string server_meta_name;
-					if (temp.size() == 2) {
-						server_meta_name = temp[1];
-
-						const std::string open_msg = std::format("session-id={0:x}", session_id) + "\naction=open";
-						shm_message_queue::message *m_open = allocate_shm_message(open_msg.size());
-						m_open->type = shm_message_queue::msg_reply;
-						memcpy(m_open->data, open_msg.c_str(), m_open->size);
-						failed = shm_meta->send_message(server_meta_name, m_open, false) == false;
-						free(m_open);
-					}
-					else {
-						failed = true;
-					}
+					uint32_t flags_temp = MI_TCP_OPEN;
+					shm_message_queue::message *m_session = wrap_message_up_tcp(
+							session_id, 
+							from_len, from, source_port,
+							to_len,   to,   destination_port,
+							flags_temp,
+							0, nullptr);
+					bool ok = shm->send_message(it->second, m_session, false);
+					free(m_session);
 
 					// allocate session
-					if (failed == false) {
-						DOLOG(logger::ll_debug, "INF) server for TCP/%d notified of new session %" PRIx64, destination_port, session_id);
+					if (ok) {
+						DOLOG(logger::ll_debug, "INF) server for TCP/%d notified via %s of new session %" PRIx64, destination_port, it->second.c_str(), session_id);
 						session_t *new_session = new session_t();
 						new_session->is_client         = false;
 						new_session->state             = established;
@@ -496,7 +489,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						new_session->peer_port         = source_port;
 						new_session->local_window_size = INITIAL_LOCAL_WINDOW_SIZE;
 						memset(new_session->shm_peer, 0x00, max_id_length);  // data channel
-						memcpy(new_session->shm_peer, temp[0].c_str(), temp[0].size());
+						memcpy(new_session->shm_peer, it->second.c_str(), it->second.size());
 
 						lck.unlock();  // FIXME
 						{
@@ -525,14 +518,13 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			if (peer_seq_nr == session->peer_seq) {
 				bool ok = true;
 				if (tcp_pl_size > 0) {
-					shm_message_queue::message *m_session = allocate_shm_message(tcp_pl_size + 12);
-					m_session->type = shm_message_queue::msg_new;
-					assert(sizeof(session_id) == 8);
-					uint32_t flags_temp = session->half_closed ? 1 : 0;
-					assert(sizeof(flags_temp) == 4);
-					memcpy(&m_session->data[0], &session_id, sizeof session_id);
-					memcpy(&m_session->data[8], &flags_temp, sizeof flags_temp);
-					memcpy(&m_session->data[12], &pl[header_size], tcp_pl_size);
+					uint32_t flags_temp = session->half_closed ? MI_TCP_FIN : 0;
+					shm_message_queue::message *m_session = wrap_message_up_tcp(
+							session_id, 
+							from_len, from, source_port,
+							to_len,   to,   destination_port,
+							flags_temp,
+							tcp_pl_size, &pl[header_size]);
 					ok = shm->send_message(session->shm_peer, m_session, false);
 					free(m_session);
 				}
