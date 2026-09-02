@@ -18,6 +18,7 @@ add_compile_options(-Wall)
 add_library(shm
 	src/utils/shm.cpp
 	src/utils/shm_message.cpp
+	src/utils/time.cpp
 )
 
 add_library(log

@@ -24,6 +24,7 @@ public:
 	enum msg_type { msg_new = 1, msg_reply = 2, msg_any = 0 /* msg_any only as parameter to wait */ };
 	struct message {
 		// TODO network byte order for consistency with some of the payloads
+		uint64_t        sent_at;  // for latency determination
 		uint32_t        size;  // by user
 		uint32_t        type;  // msg_type, by user
 		uint64_t        msg_nr;  // set by shm.cpp

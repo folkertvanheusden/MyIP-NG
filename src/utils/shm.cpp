@@ -7,6 +7,7 @@
 
 #include "log.h"
 #include "shm.h"
+#include "time.h"
 
 
 #define PAD8(x)  (((x) & 7) ? (x) + 8 - ((x) & 7) : (x))
@@ -103,7 +104,6 @@ bool shm_message_queue::begin()
 shm_message_queue::message * shm_message_queue::wait_for_message(const int timeout, const msg_type search_type, const std::optional<uint64_t> & msg_nr)
 {
 	timespec ts { };
-
 	if (timeout >= 0) {
 		// the man-page of pthread_cond_timedwait says explicitly to use gettimeofday here
 		timeval tv { };
@@ -121,6 +121,8 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 			ts.tv_nsec -= 1'000'000'000;
 		}
 	}
+
+	uint64_t started_at { get_us() };
 
 	if (int err = pthread_mutex_lock(&get_shm->mutex); err != 0) {
 		if (err == EOWNERDEAD) {
@@ -163,6 +165,9 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 				if (int err = pthread_mutex_unlock(&get_shm->mutex); err != 0)
 					DOLOG(logger::ll_error, "pthread_mutex_unlock failed: %s", strerror(err));
 
+				uint64_t end_at { get_us() };
+				DOLOG(logger::ll_debug, "wait took %.6f seconds, message latency: %.6f seconsd", (end_at - started_at) / 1'000'000., (end_at - copy->sent_at) / 1'000'000.);
+
 				return copy;
 			}
 
@@ -195,6 +200,8 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 bool shm_message_queue::send_message(const std::string & remote_identifier, message *const m, const bool blocking)
 {
 	DOLOG(logger::ll_debug, "send %smessage to %s (from %s)", blocking ? "blocking ":"", remote_identifier.c_str(), local_identifier.c_str());
+	m->sent_at = get_us();
+
 	assert(m->size > 0);
 	int put_segment = shm_open(remote_identifier.c_str(), O_RDWR, 0600);
 	if (put_segment == -1) {
