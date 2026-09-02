@@ -20,6 +20,7 @@ public:
 
 	loglevel_t get_loglevel() const { return ll; }
 	void       set_loglevel(const loglevel_t ll);
+	void       set_loglevel(const std::string & ll);
 	void       set_logfile (const std::string & log_file);
 
 	void dolog(const loglevel_t ll, const char *const file, const void *const p, const char *const function, const char *const fmt, ...);

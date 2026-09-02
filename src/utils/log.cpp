@@ -27,6 +27,22 @@ void logger::set_loglevel(const loglevel_t ll)
 	this->ll = ll;
 }
 
+void logger::set_loglevel(const std::string & ll)
+{
+	if (ll == "debug")
+		this->ll = ll_debug;
+	else if (ll == "trace")
+		this->ll = ll_trace;
+	else if (ll == "info")
+		this->ll = ll_info;
+	else if (ll == "warning")
+		this->ll = ll_warning;
+	else if (ll == "error")
+		this->ll = ll_error;
+	else if (ll == "fatal")
+		this->ll = ll_fatal;
+}
+
 void logger::set_logfile(const std::string & log_file)
 {
 	this->log_file = log_file;

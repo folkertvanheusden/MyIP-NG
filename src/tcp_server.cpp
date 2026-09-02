@@ -958,9 +958,11 @@ int main(int argc, char *argv[])
 {
 	std::string cfg_file;
 	int         c        = -1;
-	while((c = getopt(argc, argv, "c:")) != -1) {
+	while((c = getopt(argc, argv, "c:l:")) != -1) {
 		if (c == 'c')
 			cfg_file = optarg;
+		else if (c == 'l')
+			log_.set_loglevel(optarg);
 	}
 
 	if (cfg_file.empty()) {
