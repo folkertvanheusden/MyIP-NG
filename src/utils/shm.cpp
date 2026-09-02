@@ -166,7 +166,7 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 					DOLOG(logger::ll_error, "pthread_mutex_unlock failed: %s", strerror(err));
 
 				uint64_t end_at { get_us() };
-				DOLOG(logger::ll_debug, "wait took %.6f seconds, message latency: %.6f seconsd", (end_at - started_at) / 1'000'000., (end_at - copy->sent_at) / 1'000'000.);
+				DOLOG(logger::ll_debug, "wait took %.6f seconds, message latency: %.6f seconds", (end_at - started_at) / 1'000'000., (end_at - copy->sent_at) / 1'000'000.);
 
 				return copy;
 			}
