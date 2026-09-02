@@ -26,7 +26,8 @@ const std::string http_base_path = "./www";
 
 struct http_session_t
 {
-	std::string recv_buffer;
+	std::atomic_bool processing { };
+	std::string      recv_buffer;
 
 	http_session_t() {
 	}
@@ -250,13 +251,14 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 			hs = it->second;
 		}
 
-		if (hs) {
+		if (hs && hs->processing == false) {
 			if (m->size > 12) {
 				std::string temp(reinterpret_cast<const char *>(m->data + 12), m->size - 12);
 				hs->recv_buffer += temp;
 
 				size_t end_marker = hs->recv_buffer.find("\r\n\r\n");
 				if (end_marker != std::string::npos || (flags & 1 /* FIN */)) {
+					hs->processing = true;
 					std::thread handler([&] {
 							set_thread_name("http_handler");
 							process_http_request(session_id, hs, shm, out_name);
@@ -266,10 +268,9 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 						});
 					handler.detach();
 				}
-				// what if this triggers when the processing thread is already/still running?
 				else if (hs->recv_buffer.size() > 4096) {
 					abort_session(session_id, hs, shm, out_name);
-
+					hs->processing = true;
 					std::unique_lock<std::mutex> lck(sessions_lock);
 					finish_sessions.push_back(session_id);
 				}
