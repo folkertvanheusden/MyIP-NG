@@ -140,7 +140,7 @@ void run_in(shm_message_queue *const shm, const prom_handle & ph, const std::map
 		// for us? or broadcast/multicast?
 		if ((buffer[0] & 1) == 0 &&  // multicast
 		    memcmp(&buffer[0], ph.mac_addr, 6) != 0 &&
-		    memcmp(&buffer[0], bc_addr,  6) != 0)
+		    memcmp(&buffer[0], bc_addr,     6) != 0)
 			continue;
 
 		const uint16_t type = (buffer[12] << 8) | buffer[13];
