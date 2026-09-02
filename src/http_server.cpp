@@ -53,7 +53,7 @@ void abort_session(const uint64_t session_id, http_session_t *const hs, shm_mess
 {
 	shm_message_queue::message *abort_msg = allocate_shm_message(12);
 	memcpy(&abort_msg->data[0], &session_id, 8);
-	uint32_t flags = 1;
+	uint32_t flags = MI_TCP_FIN;
 	memcpy(&abort_msg->data[8], &flags, 4);
 
 	if (shm->send_message(out_name, abort_msg, true) == false)
@@ -70,7 +70,7 @@ bool send_http_header(const uint64_t session_id, shm_message_queue *const shm, c
 
 	shm_message_queue::message *http_reply = allocate_shm_message(12 + http_headers.size());
 	memcpy(&http_reply->data[0], &session_id, 8);
-	uint32_t flags = fin ? 1 : 0;
+	uint32_t flags = fin ? MI_TCP_FIN : 0;
 	memcpy(&http_reply->data[8], &flags, 4);
 	memcpy(&http_reply->data[12], http_headers.c_str(), http_reply->size - 12);
 
@@ -182,7 +182,7 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 				break;
 			}
 			memcpy(&http_reply->data[0], &session_id, 8);
-			uint32_t flags = length - chunk_size == 0 ? 1 : 0;
+			uint32_t flags = length - chunk_size == 0 ? MI_TCP_FIN : 0;
 			memcpy(&http_reply->data[8], &flags, 4);
 
 			if (shm->send_message(out_name, http_reply, true) == false)
