@@ -418,7 +418,7 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 			    pending_msg_meta->to  .has_value() == false) {
 				pending_messages.erase(it);  // erase one of the pending msg meta-records
 				free(resolve_result);
-				DOLOG(logger::ll_warning, "Invalid request: from(%d)/to(%d) missing in meta request",
+				DOLOG(logger::ll_debug, "From(%d)/to(%d) still missing in meta request, continuing",
 						pending_msg_meta->from.has_value(),
 						pending_msg_meta->to  .has_value());
 				continue;
