@@ -83,6 +83,14 @@ bool send_http_header(const uint64_t session_id, shm_message_queue *const shm, c
 	return rc;
 }
 
+void access_log(const http_session_t *const hs, const std::string & url, const int code)
+{
+	DOLOG(logger::ll_info, "HTTP GET(%d) by [%s]:%d: %s",
+			code,
+			hs->from.to_str('.', false).c_str(), hs->from_port,
+			url.c_str());
+}
+
 void process_http_request(const uint64_t session_id, http_session_t *const hs, shm_message_queue *const shm, const std::string & out_name)
 {
 	bool        first_line = true;
@@ -132,15 +140,12 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 	else if (url[0] != '/')
 		url = "/" + url;
 
-	DOLOG(logger::ll_info, "HTTP GET by [%s]:%d: %s",
-			hs->from.to_str('.', false).c_str(), hs->from_port,
-			url.c_str());
-
 	std::string local_file = http_base_path + url;
 	int fd = open(local_file.c_str(), O_RDONLY);
 	if (fd == -1) {
 		DOLOG(logger::ll_debug, "Cannot open local file \"%s\": %s", local_file.c_str(), strerror(errno));
 		send_http_header(session_id, shm, out_name, 404, 0, true, "Not found", "text/html");
+		access_log(hs, url, 404);
 		return;
 	}
 
@@ -149,6 +154,7 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 		close(fd);
 		DOLOG(logger::ll_debug, "Stat on \"%s\" failed: %s", local_file.c_str(), strerror(errno));
 		send_http_header(session_id, shm, out_name, 500, 0, true, "Unknown error", "text/html");
+		access_log(hs, url, 500);
 		return;
 	}
 
@@ -194,6 +200,8 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 
 			length -= chunk_size;
 		}
+
+		access_log(hs, url, 200);
 	}
 
 	close(fd);
