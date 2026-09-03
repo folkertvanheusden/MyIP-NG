@@ -21,7 +21,6 @@ extern "C" {
 #include "utils/gen.h"
 #include "utils/log.h"
 #include "utils/net.h"
-#include "utils/queue.h"
 #include "utils/random.h"
 #include "utils/shm.h"
 #include "utils/shm_message.h"
