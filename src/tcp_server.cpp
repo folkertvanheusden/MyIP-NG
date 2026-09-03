@@ -42,6 +42,8 @@ extern "C" {
 
 enum tcp_state_t { listen, syn_sent, syn_received, established, fin_wait_1, fin_wait_2, close_wait, closing, last_ack, time_wait, closed };
 
+constexpr const uint16_t mss_ranges[8] { 216, 536, 984, 1400, 1436, 1452, 1460, 1500 };
+
 struct tcp_data
 {
 	std::mutex lock;
@@ -95,6 +97,7 @@ struct session_t {
 	tcp_state_t state;
 	uint32_t    start_local_seq;
 	uint32_t    start_peer_seq;
+	uint16_t    mss { MI_IP4_MIN_TCP_MTU };
 	uint32_t    local_seq;
 	uint32_t    peer_seq;
 	uint16_t    local_window_size;
@@ -209,7 +212,7 @@ static uint64_t calc_session_id(const uint16_t src_port, const uint16_t dst_port
 	return rc;
 }
 
-uint32_t my_syn_cookie(const uint64_t session_id, const uint8_t syn_cookie_salt[16])
+uint32_t my_syn_cookie(const uint64_t session_id, const uint8_t syn_cookie_salt[16], const int mss_index)
 {
 	uint8_t  buffer[8 + 1];
 	memcpy(&buffer[0], &session_id, sizeof session_id);
@@ -221,7 +224,7 @@ uint32_t my_syn_cookie(const uint64_t session_id, const uint8_t syn_cookie_salt[
 	siphash(buffer, sizeof buffer, syn_cookie_salt, reinterpret_cast<uint8_t *>(sip_out), sizeof sip_out);
 
 	uint32_t s = sip_out[0] ^ sip_out[1];  // fold hash in half
-	return (s & 0xFFFFFFE0) | t;
+	return (s & 0xFFFFFF00) | (t << 3) | mss_index;
 }
 
 bool send_tcp_packet(shm_message_queue *const shm, const std::string & down,
@@ -319,6 +322,36 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		uint32_t peer_seq_nr      = get_uint32(&pl[ 4]);
 		uint32_t ack_seq_nr       = get_uint32(&pl[ 8]);
 		int      tcp_pl_size      = pl_len - header_size;
+		int      mss_index        = 1;  // default, 0 breaks curl
+
+		if ((flags & FLAG_SYN) == FLAG_SYN && (flags & FLAG_ACK) == 0) {
+			const uint8_t *cur_extra_headers_p     = &pl[20];
+			const uint8_t *const extra_headers_end = &pl[header_size];
+
+			while(extra_headers_end - 2 >= cur_extra_headers_p) {
+				// valid MSS indicator?
+				if (cur_extra_headers_p[0] == 2 && cur_extra_headers_p[1] == 4 &&
+						extra_headers_end - 4 >= cur_extra_headers_p) {
+					uint16_t mss = (cur_extra_headers_p[2] << 8) | cur_extra_headers_p[3];
+					for(int i=0; i<8; i++) {
+						if (mss >= mss_ranges[i])
+							mss_index = i;
+					}
+					DOLOG(logger::ll_debug, "Using MSS of %d bytes, %d selected in header", mss_ranges[mss_index], mss);
+				}
+
+				if (cur_extra_headers_p[0] == 0 || cur_extra_headers_p[0] == 1) // 1-byte?
+					cur_extra_headers_p++;
+				else {
+					if (cur_extra_headers_p[1] == 0) {
+						DOLOG(logger::ll_debug, "ERR) 0-sized TCP option");
+						break;
+					}
+
+					cur_extra_headers_p += cur_extra_headers_p[1];
+				}
+			}
+		}
 
 		if (header_size > pl_len) {
 			free(m);
@@ -404,7 +437,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					invalid_w_rst = !(flags & FLAG_RST);  // no RST if the flags already contain RST
 				}
 				else {
-					uint32_t syn_cookie = my_syn_cookie(session_id, syn_cookie_salt);
+					uint32_t syn_cookie = my_syn_cookie(session_id, syn_cookie_salt, mss_index);
 					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " using SYN cookie %08x, acking to %08x",
 							session_id, syn_cookie, peer_seq_nr);
 
@@ -454,13 +487,13 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			}
 			else {  // start of new session
 				// as this is a response to a SYN(+ACK), increase local sequence number
-				uint32_t syn_cookie = my_syn_cookie(session_id, syn_cookie_salt) + 1;
-				if (syn_cookie != ack_seq_nr) {
-					DOLOG(logger::ll_debug, "ERR) Invalid SYN-cookie %08x - expecting %08x", ack_seq_nr, syn_cookie);
+				uint32_t syn_cookie = my_syn_cookie(session_id, syn_cookie_salt, 0);
+				if (syn_cookie != (ack_seq_nr & ~7)) {
+					DOLOG(logger::ll_debug, "ERR) Invalid SYN-cookie %08x - expecting %08x", ack_seq_nr & ~7, syn_cookie & ~7);
 					send_tcp_packet(shm, out_name,
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
-							syn_cookie, peer_seq_nr,
+							syn_cookie + 1, peer_seq_nr,
 							FLAG_RST, window_size, { nullptr, 0 });
 				}
 				else if (auto it = mappings_in.find(destination_port); it != mappings_in.end()) {
@@ -481,13 +514,17 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						session_t *new_session = new session_t();
 						new_session->is_client         = false;
 						new_session->state             = established;
-						new_session->local_seq         = syn_cookie;
+						new_session->local_seq         = ack_seq_nr;
 						new_session->local_addr        = a_to;
 						new_session->local_port        = destination_port;
 						new_session->peer_seq          = peer_seq_nr;
 						new_session->peer_addr         = a_from;
 						new_session->peer_port         = source_port;
 						new_session->local_window_size = INITIAL_LOCAL_WINDOW_SIZE;
+						int cur_mss_index = (ack_seq_nr - 1) & 7;
+						new_session->mss               = mss_ranges[cur_mss_index];
+						DOLOG(logger::ll_debug, "MSS from SYN cookie: %d bytes (index %d)",
+								new_session->mss, cur_mss_index);
 						memset(new_session->shm_peer, 0x00, max_id_length);  // data channel
 						memcpy(new_session->shm_peer, it->second.c_str(), it->second.size());
 
@@ -614,9 +651,10 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 				if (session.second->in_flight != 0 || session.second->fin_sent == true)
 					continue;
 
-				size_t got_n = 0;
-				bool end = session.second->l7_to_tcp.peek(sizeof buffer, buffer, &got_n);
-				bool send_fin = end ? session.second->l7_send_fin : false;
+				size_t got_n    = 0;
+				size_t use_n    = std::min(sizeof buffer, size_t(session.second->mss));
+				bool   end      = session.second->l7_to_tcp.peek(use_n, buffer, &got_n);
+				bool   send_fin = end ? session.second->l7_send_fin : false;
 				session.second->in_flight = got_n;
 				session.second->fin_sent |= send_fin;
 
