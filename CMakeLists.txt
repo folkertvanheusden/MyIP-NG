@@ -113,6 +113,11 @@ add_executable(http_server
 	src/http_server.cpp
 	)
 
+add_executable(time_server
+	src/common.cpp
+	src/time_server.cpp
+	)
+
 add_custom_command(OUTPUT ${CMAKE_SOURCE_DIR}/www/setup.svg
     COMMAND dot -Tsvg ${CMAKE_SOURCE_DIR}/docs/setup.gv -o ${CMAKE_SOURCE_DIR}/www/setup.svg
     DEPENDS ${CMAKE_SOURCE_DIR}/docs/setup.gv
@@ -135,6 +140,7 @@ target_link_libraries(shm_test shm log)
 target_link_libraries(tap_server shm log misc)
 target_link_libraries(tcp_server shm log misc)
 target_link_libraries(tcp_test shm log)
+target_link_libraries(time_server shm log misc)
 target_link_libraries(udp_server shm log misc)
 
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
@@ -169,6 +175,9 @@ target_compile_options(tap_server PUBLIC ${INI_CFLAGS_OTHER})
 target_link_libraries(tcp_server ${INI_LIBRARIES})
 target_include_directories(tcp_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(tcp_server PUBLIC ${INI_CFLAGS_OTHER})
+target_link_libraries(time_server ${INI_LIBRARIES})
+target_include_directories(time_server PUBLIC ${INI_INCLUDE_DIRS})
+target_compile_options(time_server PUBLIC ${INI_CFLAGS_OTHER})
 target_link_libraries(udp_server ${INI_LIBRARIES})
 target_include_directories(udp_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(udp_server PUBLIC ${INI_CFLAGS_OTHER})
