@@ -322,7 +322,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		uint32_t peer_seq_nr      = get_uint32(&pl[ 4]);
 		uint32_t ack_seq_nr       = get_uint32(&pl[ 8]);
 		int      tcp_pl_size      = pl_len - header_size;
-		int      mss_index        = 0;  // default
+		int      mss_index        = 1;  // default, 0 breaks curl
 
 		if ((flags & FLAG_SYN) == FLAG_SYN && (flags & FLAG_ACK) == 0) {
 			const uint8_t *cur_extra_headers_p     = &pl[20];
@@ -330,21 +330,25 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 			while(extra_headers_end - 2 >= cur_extra_headers_p) {
 				// valid MSS indicator?
-				if (cur_extra_headers_p[0] == 2 && cur_extra_headers_p[1] == 4) {
+				if (cur_extra_headers_p[0] == 2 && cur_extra_headers_p[1] == 4 &&
+						extra_headers_end - 4 >= cur_extra_headers_p) {
 					uint16_t mss = (cur_extra_headers_p[2] << 8) | cur_extra_headers_p[3];
 					for(int i=0; i<8; i++) {
 						if (mss >= mss_ranges[i])
 							mss_index = i;
 					}
-					DOLOG(logger::ll_debug, "Using MSS of %d bytes", mss_index);
+					DOLOG(logger::ll_debug, "Using MSS of %d bytes, %d selected in header", mss_ranges[mss_index], mss);
 				}
 
 				if (cur_extra_headers_p[0] == 0 || cur_extra_headers_p[0] == 1) // 1-byte?
 					cur_extra_headers_p++;
 				else {
+					if (cur_extra_headers_p[1] == 0) {
+						DOLOG(logger::ll_debug, "ERR) 0-sized TCP option");
+						break;
+					}
+
 					cur_extra_headers_p += cur_extra_headers_p[1];
-					if (cur_extra_headers_p[1] == 0)
-						return;
 				}
 			}
 		}
@@ -483,9 +487,9 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			}
 			else {  // start of new session
 				// as this is a response to a SYN(+ACK), increase local sequence number
-				uint32_t syn_cookie = my_syn_cookie(session_id, syn_cookie_salt, mss_index);
-				if (syn_cookie + 1 != ack_seq_nr) {
-					DOLOG(logger::ll_debug, "ERR) Invalid SYN-cookie %08x - expecting %08x", ack_seq_nr, syn_cookie + 1);
+				uint32_t syn_cookie = my_syn_cookie(session_id, syn_cookie_salt, 0);
+				if (syn_cookie != (ack_seq_nr & ~7)) {
+					DOLOG(logger::ll_debug, "ERR) Invalid SYN-cookie %08x - expecting %08x", ack_seq_nr & ~7, syn_cookie & ~7);
 					send_tcp_packet(shm, out_name,
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
@@ -510,14 +514,17 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						session_t *new_session = new session_t();
 						new_session->is_client         = false;
 						new_session->state             = established;
-						new_session->local_seq         = syn_cookie + 1;
+						new_session->local_seq         = ack_seq_nr;
 						new_session->local_addr        = a_to;
 						new_session->local_port        = destination_port;
 						new_session->peer_seq          = peer_seq_nr;
 						new_session->peer_addr         = a_from;
 						new_session->peer_port         = source_port;
 						new_session->local_window_size = INITIAL_LOCAL_WINDOW_SIZE;
-						new_session->mss               = mss_ranges[syn_cookie & 3];
+						int cur_mss_index = (ack_seq_nr - 1) & 7;
+						new_session->mss               = mss_ranges[cur_mss_index];
+						DOLOG(logger::ll_debug, "MSS from SYN cookie: %d bytes (index %d)",
+								new_session->mss, cur_mss_index);
 						memset(new_session->shm_peer, 0x00, max_id_length);  // data channel
 						memcpy(new_session->shm_peer, it->second.c_str(), it->second.size());
 
