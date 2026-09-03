@@ -2,7 +2,7 @@
 
 * libiniparser-dev
 * cmake
-* clang++-22
+* c++ compiler (23)
 * graphviz
 
 ## compile
