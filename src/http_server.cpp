@@ -152,7 +152,6 @@ void access_log(const http_session_t *const hs, const std::string & url, const i
 
 int my_wolfssl_receive(WOLFSSL *ssl, char *buf, int sz, void *ctx)
 {
-	printf("my_wolfssl_receive %d\n", sz);
 	http_session_t *session { reinterpret_cast<http_session_t *>(ctx) };
 
 	if (recv_func(session, reinterpret_cast<uint8_t *>(buf), sz) == -1) {
@@ -165,7 +164,6 @@ int my_wolfssl_receive(WOLFSSL *ssl, char *buf, int sz, void *ctx)
 
 int my_wolfssl_send(WOLFSSL *ssl, char *buf, int sz, void *ctx)
 {
-	printf("my_wolfssl_send %d\n", sz);
 	http_session_t *session { reinterpret_cast<http_session_t *>(ctx) };
 
 	if (send_func(session, reinterpret_cast<const uint8_t *>(buf), sz) == -1) {
