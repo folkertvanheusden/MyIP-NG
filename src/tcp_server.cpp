@@ -566,7 +566,8 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				}
 
 				if (ok) {
-					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 ", data sent to L7", session_id);
+					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 ", data (%d bytes) sent to L7",
+							session_id, tcp_pl_size);
 					if (send_tcp_packet(shm, out_name,
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
