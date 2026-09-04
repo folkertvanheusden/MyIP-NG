@@ -5,6 +5,7 @@
 #include <csignal>
 #include <cstring>
 #include <fcntl.h>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <thread>
@@ -18,6 +19,7 @@
 #include "utils/gen.h"
 #include "utils/log.h"
 #include "utils/net.h"
+#include "utils/queue.h"
 #include "utils/shm.h"
 #include "utils/shm_message.h"
 #include "utils/stoi.h"
@@ -27,19 +29,35 @@ const std::string http_base_path = "./www";
 
 struct http_session_t
 {
-	const addr_ip4   from;
-	const uint16_t   from_port;
-	const addr_ip4   to;
-	const uint16_t   to_port;
-	std::atomic_bool processing { };
-	std::string      recv_buffer;
+	const uint64_t    session_id;
+	const std::string out_name;
+	shm_message_queue *const shm;
+	const addr_ip4    from;
+	const uint16_t    from_port;
+	const addr_ip4    to;
+	const uint16_t    to_port;
+	const bool        is_tls;
 
-	http_session_t(const addr_ip4 from, const uint16_t from_port,
-		       const addr_ip4 to,   const uint16_t to_port):
+	std::atomic_bool  finished  { false };
+	std::atomic_bool  stop_flag { false };
+	queue<std::vector<uint8_t> > incoming;
+
+	http_session_t(const uint64_t session_id, const std::string & out_name,
+		shm_message_queue *const shm,
+		const addr_ip4 from, const uint16_t from_port,
+		const addr_ip4 to,   const uint16_t to_port,
+		const bool is_tls):
+		session_id(session_id), out_name(out_name), shm(shm),
 		from(from), from_port(from_port),
-		to  (to  ), to_port  (to_port  )
+		to  (to  ), to_port  (to_port  ),
+		is_tls(is_tls)
 	{
 	}
+};
+
+struct http_session_tls_t: public http_session_t
+{
+	// TODO bearssl stuff
 };
 
 std::atomic_bool stop_flag { false };
@@ -49,36 +67,86 @@ void sig_handler(int sig)
 	stop_flag = true;
 }
 
-void abort_session(const uint64_t session_id, http_session_t *const hs, shm_message_queue *const shm, const std::string & out_name)
+int send_func(void *const context, const uint8_t *const from, const size_t n)
 {
-	shm_message_queue::message *abort_msg = allocate_shm_message(12);
-	memcpy(&abort_msg->data[0], &session_id, 8);
-	uint32_t flags = MI_TCP_FIN;
-	memcpy(&abort_msg->data[8], &flags, 4);
+	int rc = -1;
+	http_session_t *session { reinterpret_cast<http_session_t *>(context) };
 
-	if (shm->send_message(out_name, abort_msg, true) == false)
-		DOLOG(logger::ll_warning, "Cannot send to %s", out_name.c_str());
+	if (from == nullptr && n == 0) {
+		shm_message_queue::message *end_msg = allocate_shm_message(12);
+		memcpy(&end_msg->data[0], &session->session_id, 8);
+		uint32_t flags = MI_TCP_FIN;
+		memcpy(&end_msg->data[8], &flags, 4);
 
-	free(abort_msg);
+		if (session->shm->send_message(session->out_name, end_msg, true) == false)
+			DOLOG(logger::ll_warning, "Cannot send FIN message to %s", session->out_name.c_str());
+		else
+			rc = 0;
+
+		free(end_msg);
+	}
+	else {
+		shm_message_queue::message *data_msg = allocate_shm_message(12 + n);
+		memcpy(&data_msg->data[0], &session->session_id, 8);
+		uint32_t flags = 0;
+		memcpy(&data_msg->data[8], &flags, 4);
+		memcpy(&data_msg->data[12], from, n);
+
+		if (session->shm->send_message(session->out_name, data_msg, true) == false)
+			DOLOG(logger::ll_warning, "Cannot send HTTP headers to %s", session->out_name.c_str());
+		else
+			rc = n;
+
+		free(data_msg);
+	}
+
+	return rc;
 }
 
-bool send_http_header(const uint64_t session_id, shm_message_queue *const shm, const std::string & out_name, const int which, const size_t payload_size, const bool fin, const std::string & message, const std::string & mime_type)
+int recv_func(void *const context, uint8_t *const to, const size_t n)
 {
-	DOLOG(logger::ll_debug, "Sending HTTP %d code (\"%s\")", which, message.c_str());
+	if (n == 0)
+		return 0;
+
+	http_session_tls_t *session { reinterpret_cast<http_session_tls_t *>(context) };
+
+	uint8_t *p    = to;
+	size_t   todo = n;
+	do {
+		auto   values = session->incoming.pop();
+		size_t v_n    = values.size();
+		memcpy(p, values.data(), todo);
+
+		if (v_n > todo) {
+			session->incoming.unpop(std::vector<uint8_t>(values.data() + todo, values.data() + v_n));
+			todo = 0;
+		}
+		else {
+			todo -= v_n;
+			p    += v_n;
+		}
+	} while(todo > 0);
+
+	return n;
+}
+
+void abort_session(http_session_t *const session)
+{
+	send_func(session, nullptr, 0);
+}
+
+bool send_http_header(http_session_t *const session, const int which, const size_t payload_size, const bool fin, const std::string & message, const std::string & mime_type)
+{
+	DOLOG(logger::ll_debug, "Sending HTTP %d code (\"%s\"), announcing %zu bytes payload", which, message.c_str(), payload_size);
 
 	const std::string http_headers = std::format("HTTP/1.0 {} {}\r\nServer: MyIP-NG HTTPd\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n", which, message, mime_type, payload_size);
+	const size_t headers_size = http_headers.size();
+	bool rc = send_func(session, reinterpret_cast<const uint8_t *>(http_headers.c_str()), headers_size) == headers_size;
 
-	shm_message_queue::message *http_reply = allocate_shm_message(12 + http_headers.size());
-	memcpy(&http_reply->data[0], &session_id, 8);
-	uint32_t flags = fin ? MI_TCP_FIN : 0;
-	memcpy(&http_reply->data[8], &flags, 4);
-	memcpy(&http_reply->data[12], http_headers.c_str(), http_reply->size - 12);
-
-	bool rc = shm->send_message(out_name, http_reply, true);
-	if (rc == false)
-		DOLOG(logger::ll_warning, "Cannot send HTTP headers to %s", out_name.c_str());
-
-	free(http_reply);
+	if (fin && rc) {
+		DOLOG(logger::ll_debug, "Sending FIN");
+		rc = send_func(session, nullptr, 0) == 0;
+	}
 
 	return rc;
 }
@@ -91,18 +159,29 @@ void access_log(const http_session_t *const hs, const std::string & url, const i
 			url.c_str());
 }
 
-void process_http_request(const uint64_t session_id, http_session_t *const hs, shm_message_queue *const shm, const std::string & out_name)
+void process_http_request(http_session_t *const session)
 {
+	DOLOG(logger::ll_debug, "HTTP request handler running for session %" PRIx64, session->session_id);
+
+	std::string recv_buffer;
+	do {
+		auto incoming = session->incoming.pop();
+		recv_buffer += std::string(reinterpret_cast<const char *>(incoming.data()), incoming.size());
+	}
+	while(recv_buffer.find("\r\n\r\n") == std::string::npos);
+
 	bool        first_line = true;
 	std::string url;
-	auto        lines = split(hs->recv_buffer, "\r\n");
+	auto        lines = split(recv_buffer, "\r\n");
 	for(auto & line: lines) {
 		if (first_line) {
 			first_line = false;
 
 			auto parts = split(line, " ");
 			if (parts.size() != 3) {
-				send_http_header(session_id, shm, out_name, 405, 0, true, "Can't make cheese from your supposedly HTTP request", "text/html");
+				send_http_header(session,
+						405, 0, true, "Can't make cheese from your supposedly HTTP request", "text/html");
+				session->finished = true;
 				return;
 			}
 
@@ -110,20 +189,25 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 				url = line.substr(4);
 				auto space = url.find(" ");
 				if (space == std::string::npos) {  // invalid
-					abort_session(session_id, hs, shm, out_name);
+					abort_session(session);
+					session->finished = true;
 					return;
 				}
 				url = url.substr(0, space);
 			}
 			else {
-				send_http_header(session_id, shm, out_name, 501, 0, true, "Only GET please", "text/html");
+				send_http_header(session,
+						501, 0, true, "Only GET please", "text/html");
+				session->finished = true;
 				return;
 			}
 		}
 	}
 
 	if (url.empty()) {
-		send_http_header(session_id, shm, out_name, 405, 0, true, "URL missing", "text/html");
+		send_http_header(session,
+				405, 0, true, "URL missing", "text/html");
+		session->finished = true;
 		return;
 	}
 
@@ -131,7 +215,9 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 
 	// TODO: compare with canonical path (std::filesystem::canonical) instead
 	if (url.find("..") != std::string::npos || url.find("~") != std::string::npos) {
-		send_http_header(session_id, shm, out_name, 500, 0, true, "Invalid URL", "text/html");
+		send_http_header(session,
+				500, 0, true, "Invalid URL", "text/html");
+		session->finished = true;
 		return;
 	}
 
@@ -144,8 +230,10 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 	int fd = open(local_file.c_str(), O_RDONLY);
 	if (fd == -1) {
 		DOLOG(logger::ll_debug, "Cannot open local file \"%s\": %s", local_file.c_str(), strerror(errno));
-		send_http_header(session_id, shm, out_name, 404, 0, true, "Not found", "text/html");
-		access_log(hs, url, 404);
+		send_http_header(session,
+				404, 0, true, "Not found", "text/html");
+		access_log(session, url, 404);
+		session->finished = true;
 		return;
 	}
 
@@ -153,8 +241,10 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 	if (fstat(fd, &st) == -1) {
 		close(fd);
 		DOLOG(logger::ll_debug, "Stat on \"%s\" failed: %s", local_file.c_str(), strerror(errno));
-		send_http_header(session_id, shm, out_name, 500, 0, true, "Unknown error", "text/html");
-		access_log(hs, url, 500);
+		send_http_header(session,
+				500, 0, true, "Unknown error", "text/html");
+		access_log(session, url, 500);
+		session->finished = true;
 		return;
 	}
 
@@ -179,32 +269,33 @@ void process_http_request(const uint64_t session_id, http_session_t *const hs, s
 	}
 
 	auto length { st.st_size };
-	if (send_http_header(session_id, shm, out_name, 200, length, false, "Ok!", mime_type)) {
+	if (send_http_header(session, 200, length, false, "Ok!", mime_type)) {
+		uint8_t buffer[4096];
 		while(length > 0) {
-			auto chunk_size = std::min(length, 4096l);
+			auto chunk_size = std::min(length, long(sizeof buffer));
 			DOLOG(logger::ll_debug, "Sending %lu bytes, %lu left", chunk_size, length);
 
-			shm_message_queue::message *http_reply = allocate_shm_message(12 + chunk_size);
-			if (int rc = read(fd, &http_reply->data[12], chunk_size); rc != chunk_size) {
+			if (int rc = read(fd, buffer, chunk_size); rc != chunk_size) {
 				DOLOG(logger::ll_debug, "Short read on \"%s\"", local_file.c_str());
 				break;
 			}
-			memcpy(&http_reply->data[0], &session_id, 8);
-			uint32_t flags = length - chunk_size == 0 ? MI_TCP_FIN : 0;
-			memcpy(&http_reply->data[8], &flags, 4);
 
-			if (shm->send_message(out_name, http_reply, true) == false)
-				DOLOG(logger::ll_warning, "Cannot send to %s", out_name.c_str());
-
-			free(http_reply);
+			if (send_func(session, buffer, chunk_size) != chunk_size) {
+				DOLOG(logger::ll_debug, "Short write on \"%s\"", local_file.c_str());
+				break;
+			}
 
 			length -= chunk_size;
 		}
 
-		access_log(hs, url, 200);
+		access_log(session, url, 200);
 	}
 
 	close(fd);
+
+	send_func(session, nullptr, 0);  // send FIN
+
+	session->finished = true;
 }
 
 void push_meta_reply(shm_message_queue *const shm_meta, const std::string & to, const std::string & reply)
@@ -219,27 +310,31 @@ void push_meta_reply(shm_message_queue *const shm_meta, const std::string & to, 
 }
 
 void run_in(shm_message_queue *const shm, const std::string & out_name,
-		std::map<uint64_t, http_session_t *> *const sessions, std::mutex & sessions_lock,
-		shm_message_queue *const shm_meta)
+		std::map<uint64_t, std::pair<std::thread *, http_session_t *> > *const sessions, std::mutex & sessions_lock,
+		shm_message_queue *const shm_meta,
+		const bool is_tls)
 {
 	set_thread_name("run_in");
-
-	std::vector<uint64_t> finish_sessions;
 
 	while(!stop_flag) {
 		// finish_sessions
 		{
+			std::vector<uint64_t> delete_these;
+
 			std::unique_lock<std::mutex> lck(sessions_lock);
-			for(auto & session_id: finish_sessions) {
-				auto it = sessions->find(session_id);
-				if (it == sessions->end())
-					DOLOG(logger::ll_error, "Internal error: session %" PRIx64 " not known", session_id);
-				else {
-					delete it->second;
-					sessions->erase(it);
+			for(auto & session: *sessions) {
+				if (session.second.second->finished) {
+					DOLOG(logger::ll_debug, "Deleting session/thread %" PRIx64, session.first);
+					session.second.second->stop_flag = true;
+					session.second.first->join();
+					delete session.second.first;
+					delete session.second.second;
+					delete_these.push_back(session.first);
 				}
 			}
-			finish_sessions.clear();
+
+			for(auto session: delete_these)
+				sessions->erase(session);
 		}
 
 		// process incoming data
@@ -280,10 +375,13 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 			if (it == sessions->end()) {
 				if (flags & MI_TCP_OPEN) {
 					DOLOG(logger::ll_debug, "Session %" PRIx64 " not known - new session", session_id);
-					auto *session = new http_session_t(
+					hs = new http_session_t(
+							session_id, out_name, shm,
 							addr_ip4(from, from_len), from_port,
-							addr_ip4(to, to_len), to_port);
-					it = sessions->insert({ session_id, session }).first;
+							addr_ip4(to, to_len), to_port, is_tls);
+					std::thread *th = new std::thread([hs] { process_http_request(hs); });
+					auto rc = sessions->insert({ session_id, { th, hs } }).second;
+					assert(rc);
 				}
 				// TODO MI_TCP_CLOSE
 				else {
@@ -292,44 +390,21 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 					continue;
 				}
 			}
-
-			hs = it->second;
-		}
-
-		if (hs && hs->processing == false) {
-			if (pl_len > 0) {
-				std::string temp(reinterpret_cast<const char *>(pl), pl_len);
-				hs->recv_buffer += temp;
-
-				size_t end_marker = hs->recv_buffer.find("\r\n\r\n");
-				if (end_marker != std::string::npos || (flags & 1 /* FIN */)) {
-					hs->processing = true;
-					std::thread handler([session_id, hs, shm, out_name, &sessions_lock, &finish_sessions] {
-							set_thread_name("http_handler");
-							process_http_request(session_id, hs, shm, out_name);
-
-							std::unique_lock<std::mutex> lck(sessions_lock);
-							finish_sessions.push_back(session_id);
-						});
-					handler.detach();
-				}
-				else if (hs->recv_buffer.size() > 4096) {
-					abort_session(session_id, hs, shm, out_name);
-					hs->processing = true;
-					std::unique_lock<std::mutex> lck(sessions_lock);
-					finish_sessions.push_back(session_id);
-				}
+			else {
+				hs = it->second.second;
 			}
 		}
-		else {
+
+		if (hs)
+			hs->incoming.push(std::vector<uint8_t>(pl, &pl[pl_len]));
+		else
 			DOLOG(logger::ll_warning, "HTTP session %" PRIx64 " not found", session_id);
-		}
 
 		free(m);
 	}
 }
 
-void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, http_session_t *> *const sessions, std::mutex & sessions_lock)
+void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, std::pair<std::thread *, http_session_t *> > *const sessions, std::mutex & sessions_lock)
 {
 	set_thread_name("run_meta");
 
@@ -382,7 +457,10 @@ void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, http_session
 			std::unique_lock<std::mutex> lck(sessions_lock);
 			auto it = sessions->find(session_id.value());
 			if (it != sessions->end()) {
-				delete it->second;
+				it->second.second->stop_flag = true;
+				it->second.first->join();
+				delete it->second.first;
+				delete it->second.second;
 				sessions->erase(it);
 			}
 			else {
@@ -401,10 +479,11 @@ void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, http_session
 
 void run(shm_message_queue *const shm, const std::string & out_name,
 		shm_message_queue *const shm_meta,
-		std::map<uint64_t, http_session_t *> *const sessions, std::mutex & sessions_lock)
+		std::map<uint64_t, std::pair<std::thread *, http_session_t *> > *const sessions, std::mutex & sessions_lock,
+		const bool is_tls)
 {
-	std::thread rx  ([&] { run_in  (shm, out_name, sessions, sessions_lock, shm_meta); });
-	std::thread meta([&] { run_meta(shm_meta, sessions, sessions_lock     ); });
+	std::thread rx  ([&] { run_in  (shm, out_name, sessions, sessions_lock, shm_meta, is_tls); });
+	std::thread meta([&] { run_meta(shm_meta,      sessions, sessions_lock); });
 	meta.join();
 	rx.join();
 }
@@ -456,6 +535,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 	int msg_queue_size_meta = iniparser_getint(d, "specific:meta-queue-size", 512);
+	int is_tls = iniparser_getboolean(d, "specific:enable-tls", false);
 	iniparser_freedict(d);
 
 	signal(SIGINT, sig_handler);
@@ -468,10 +548,10 @@ int main(int argc, char *argv[])
 	if (shm_meta == nullptr)
 		return 1;
 
-	std::map<uint64_t, http_session_t *> sessions;
+	std::map<uint64_t, std::pair<std::thread *, http_session_t *> > sessions;
 	std::mutex sessions_lock;
 
-	run(shm, out_name, shm_meta, &sessions, sessions_lock);
+	run(shm, out_name, shm_meta, &sessions, sessions_lock, is_tls);
 
 	delete shm;
 
