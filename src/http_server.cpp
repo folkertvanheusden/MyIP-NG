@@ -12,6 +12,8 @@
 #include <arpa/inet.h>
 #include <iniparser/iniparser.h>
 #include <sys/stat.h>
+#include <wolfssl/wolfcrypt/settings.h>
+#include <wolfssl/ssl.h>
 
 #include "common.h"
 #include "tcp.h"
@@ -36,7 +38,8 @@ struct http_session_t
 	const uint16_t    from_port;
 	const addr_ip4    to;
 	const uint16_t    to_port;
-	const bool        is_tls;
+	WOLFSSL_CTX      *const ctx;
+	WOLFSSL          *ssl { nullptr };
 
 	std::atomic_bool  finished  { false };
 	std::atomic_bool  stop_flag { false };
@@ -46,18 +49,13 @@ struct http_session_t
 		shm_message_queue *const shm,
 		const addr_ip4 from, const uint16_t from_port,
 		const addr_ip4 to,   const uint16_t to_port,
-		const bool is_tls):
+		WOLFSSL_CTX *const ctx):
 		session_id(session_id), out_name(out_name), shm(shm),
 		from(from), from_port(from_port),
 		to  (to  ), to_port  (to_port  ),
-		is_tls(is_tls)
+		ctx(ctx)
 	{
 	}
-};
-
-struct http_session_tls_t: public http_session_t
-{
-	// TODO bearssl stuff
 };
 
 std::atomic_bool stop_flag { false };
@@ -67,55 +65,50 @@ void sig_handler(int sig)
 	stop_flag = true;
 }
 
-int send_func(void *const context, const uint8_t *const from, const size_t n)
+void fin_func(http_session_t *const session)
+{
+	shm_message_queue::message *end_msg = allocate_shm_message(12);
+	memcpy(&end_msg->data[0], &session->session_id, 8);
+	uint32_t flags = MI_TCP_FIN;
+	memcpy(&end_msg->data[8], &flags, 4);
+
+	if (session->shm->send_message(session->out_name, end_msg, true) == false)
+		DOLOG(logger::ll_warning, "Cannot send FIN message to %s", session->out_name.c_str());
+
+	free(end_msg);
+}
+
+int send_func(http_session_t *const session, const uint8_t *const from, const size_t n)
 {
 	int rc = -1;
-	http_session_t *session { reinterpret_cast<http_session_t *>(context) };
 
-	if (from == nullptr && n == 0) {
-		shm_message_queue::message *end_msg = allocate_shm_message(12);
-		memcpy(&end_msg->data[0], &session->session_id, 8);
-		uint32_t flags = MI_TCP_FIN;
-		memcpy(&end_msg->data[8], &flags, 4);
+	shm_message_queue::message *data_msg = allocate_shm_message(12 + n);
+	memcpy(&data_msg->data[0], &session->session_id, 8);
+	uint32_t flags = 0;
+	memcpy(&data_msg->data[8], &flags, 4);
+	memcpy(&data_msg->data[12], from, n);
 
-		if (session->shm->send_message(session->out_name, end_msg, true) == false)
-			DOLOG(logger::ll_warning, "Cannot send FIN message to %s", session->out_name.c_str());
-		else
-			rc = 0;
+	if (session->shm->send_message(session->out_name, data_msg, true) == false)
+		DOLOG(logger::ll_warning, "Cannot send HTTP headers to %s", session->out_name.c_str());
+	else
+		rc = n;
 
-		free(end_msg);
-	}
-	else {
-		shm_message_queue::message *data_msg = allocate_shm_message(12 + n);
-		memcpy(&data_msg->data[0], &session->session_id, 8);
-		uint32_t flags = 0;
-		memcpy(&data_msg->data[8], &flags, 4);
-		memcpy(&data_msg->data[12], from, n);
-
-		if (session->shm->send_message(session->out_name, data_msg, true) == false)
-			DOLOG(logger::ll_warning, "Cannot send HTTP headers to %s", session->out_name.c_str());
-		else
-			rc = n;
-
-		free(data_msg);
-	}
+	free(data_msg);
 
 	return rc;
 }
 
-int recv_func(void *const context, uint8_t *const to, const size_t n)
+int recv_func(http_session_t *const session, uint8_t *const to, const size_t n)
 {
 	if (n == 0)
 		return 0;
-
-	http_session_tls_t *session { reinterpret_cast<http_session_tls_t *>(context) };
 
 	uint8_t *p    = to;
 	size_t   todo = n;
 	do {
 		auto   values = session->incoming.pop();
 		size_t v_n    = values.size();
-		memcpy(p, values.data(), todo);
+		memcpy(p, values.data(), std::min(todo, v_n));
 
 		if (v_n > todo) {
 			session->incoming.unpop(std::vector<uint8_t>(values.data() + todo, values.data() + v_n));
@@ -130,25 +123,23 @@ int recv_func(void *const context, uint8_t *const to, const size_t n)
 	return n;
 }
 
-void abort_session(http_session_t *const session)
-{
-	send_func(session, nullptr, 0);
-}
-
-bool send_http_header(http_session_t *const session, const int which, const size_t payload_size, const bool fin, const std::string & message, const std::string & mime_type)
+bool send_http_header(http_session_t *const session, const int which, const size_t payload_size, const std::string & message, const std::string & mime_type)
 {
 	DOLOG(logger::ll_debug, "Sending HTTP %d code (\"%s\"), announcing %zu bytes payload", which, message.c_str(), payload_size);
 
 	const std::string http_headers = std::format("HTTP/1.0 {} {}\r\nServer: MyIP-NG HTTPd\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n", which, message, mime_type, payload_size);
-	const size_t headers_size = http_headers.size();
-	bool rc = send_func(session, reinterpret_cast<const uint8_t *>(http_headers.c_str()), headers_size) == headers_size;
+	const size_t headers_size { http_headers.size() };
 
-	if (fin && rc) {
-		DOLOG(logger::ll_debug, "Sending FIN");
-		rc = send_func(session, nullptr, 0) == 0;
+	size_t done = 0;
+	if (session->ctx)
+		done = wolfSSL_write(session->ssl, http_headers.c_str(), headers_size);
+	else
+		done = send_func(session, reinterpret_cast<const uint8_t *>(http_headers.c_str()), headers_size);
+	if (done != headers_size) {
+		DOLOG(logger::ll_debug, "Send failed, exp to send: %zu, actual send: %zd", headers_size, done);
+		return false;
 	}
-
-	return rc;
+	return true;
 }
 
 void access_log(const http_session_t *const hs, const std::string & url, const int code)
@@ -159,14 +150,59 @@ void access_log(const http_session_t *const hs, const std::string & url, const i
 			url.c_str());
 }
 
+int my_wolfssl_receive(WOLFSSL *ssl, char *buf, int sz, void *ctx)
+{
+	printf("my_wolfssl_receive %d\n", sz);
+	http_session_t *session { reinterpret_cast<http_session_t *>(ctx) };
+
+	if (recv_func(session, reinterpret_cast<uint8_t *>(buf), sz) == -1) {
+		DOLOG(logger::ll_debug, "Receive failure, session %" PRIx64, session->session_id);
+		return 0;  // connection closed
+	}
+
+	return sz;
+}
+
+int my_wolfssl_send(WOLFSSL *ssl, char *buf, int sz, void *ctx)
+{
+	printf("my_wolfssl_send %d\n", sz);
+	http_session_t *session { reinterpret_cast<http_session_t *>(ctx) };
+
+	if (send_func(session, reinterpret_cast<const uint8_t *>(buf), sz) == -1) {
+		DOLOG(logger::ll_debug, "Send failure, session %" PRIx64, session->session_id);
+		return 0;  // connection closed
+	}
+
+	return sz;
+}
+
 void process_http_request(http_session_t *const session)
 {
 	DOLOG(logger::ll_debug, "HTTP request handler running for session %" PRIx64, session->session_id);
 
+	if (session->ctx) {
+		session->ssl = wolfSSL_new(session->ctx);
+		wolfSSL_SetIOReadCtx (session->ssl, session);
+		wolfSSL_SetIOWriteCtx(session->ssl, session);
+	}
+
 	std::string recv_buffer;
 	do {
-		auto incoming = session->incoming.pop();
-		recv_buffer += std::string(reinterpret_cast<const char *>(incoming.data()), incoming.size());
+		if (session->ssl) {
+			char c = 0;
+			if (wolfSSL_read(session->ssl, &c, 1) != 1) {
+				DOLOG(logger::ll_debug, "Read error");
+				wolfSSL_free(session->ssl);
+				fin_func(session);
+				session->finished = true;
+				return;
+			}
+			recv_buffer += c;
+		}
+		else {
+			auto incoming = session->incoming.pop();
+			recv_buffer += std::string(reinterpret_cast<const char *>(incoming.data()), incoming.size());
+		}
 	}
 	while(recv_buffer.find("\r\n\r\n") == std::string::npos);
 
@@ -180,7 +216,10 @@ void process_http_request(http_session_t *const session)
 			auto parts = split(line, " ");
 			if (parts.size() != 3) {
 				send_http_header(session,
-						405, 0, true, "Can't make cheese from your supposedly HTTP request", "text/html");
+						405, 0, "Can't make cheese from your supposedly HTTP request", "text/html");
+				if (session->ssl)
+					wolfSSL_free(session->ssl);
+				fin_func(session);
 				session->finished = true;
 				return;
 			}
@@ -189,7 +228,9 @@ void process_http_request(http_session_t *const session)
 				url = line.substr(4);
 				auto space = url.find(" ");
 				if (space == std::string::npos) {  // invalid
-					abort_session(session);
+					if (session->ssl)
+						wolfSSL_free(session->ssl);
+					fin_func(session);
 					session->finished = true;
 					return;
 				}
@@ -197,7 +238,10 @@ void process_http_request(http_session_t *const session)
 			}
 			else {
 				send_http_header(session,
-						501, 0, true, "Only GET please", "text/html");
+						501, 0, "Only GET please", "text/html");
+				if (session->ssl)
+					wolfSSL_free(session->ssl);
+				fin_func(session);
 				session->finished = true;
 				return;
 			}
@@ -206,7 +250,10 @@ void process_http_request(http_session_t *const session)
 
 	if (url.empty()) {
 		send_http_header(session,
-				405, 0, true, "URL missing", "text/html");
+				405, 0, "URL missing", "text/html");
+		if (session->ssl)
+			wolfSSL_free(session->ssl);
+		fin_func(session);
 		session->finished = true;
 		return;
 	}
@@ -216,7 +263,10 @@ void process_http_request(http_session_t *const session)
 	// TODO: compare with canonical path (std::filesystem::canonical) instead
 	if (url.find("..") != std::string::npos || url.find("~") != std::string::npos) {
 		send_http_header(session,
-				500, 0, true, "Invalid URL", "text/html");
+				500, 0, "Invalid URL", "text/html");
+		if (session->ssl)
+			wolfSSL_free(session->ssl);
+		fin_func(session);
 		session->finished = true;
 		return;
 	}
@@ -231,8 +281,11 @@ void process_http_request(http_session_t *const session)
 	if (fd == -1) {
 		DOLOG(logger::ll_debug, "Cannot open local file \"%s\": %s", local_file.c_str(), strerror(errno));
 		send_http_header(session,
-				404, 0, true, "Not found", "text/html");
+				404, 0, "Not found", "text/html");
 		access_log(session, url, 404);
+		if (session->ssl)
+			wolfSSL_free(session->ssl);
+		fin_func(session);
 		session->finished = true;
 		return;
 	}
@@ -242,8 +295,11 @@ void process_http_request(http_session_t *const session)
 		close(fd);
 		DOLOG(logger::ll_debug, "Stat on \"%s\" failed: %s", local_file.c_str(), strerror(errno));
 		send_http_header(session,
-				500, 0, true, "Unknown error", "text/html");
+				500, 0, "Unknown error", "text/html");
 		access_log(session, url, 500);
+		if (session->ssl)
+			wolfSSL_free(session->ssl);
+		fin_func(session);
 		session->finished = true;
 		return;
 	}
@@ -268,8 +324,10 @@ void process_http_request(http_session_t *const session)
 			DOLOG(logger::ll_debug, "\"%s\" is an unkown file type", ext.c_str());
 	}
 
+	sleep(1);
 	auto length { st.st_size };
-	if (send_http_header(session, 200, length, false, "Ok!", mime_type)) {
+	if (send_http_header(session, 200, length, "Ok!", mime_type)) {
+	sleep(1);
 		uint8_t buffer[4096];
 		while(length > 0) {
 			auto chunk_size = std::min(length, long(sizeof buffer));
@@ -280,9 +338,17 @@ void process_http_request(http_session_t *const session)
 				break;
 			}
 
-			if (send_func(session, buffer, chunk_size) != chunk_size) {
-				DOLOG(logger::ll_debug, "Short write on \"%s\"", local_file.c_str());
-				break;
+			if (session->ssl) {
+				if (wolfSSL_write(session->ssl, buffer, chunk_size) != chunk_size) {
+					DOLOG(logger::ll_debug, "Short write on \"%s\"", local_file.c_str());
+					break;
+				}
+			}
+			else {
+				if (send_func(session, buffer, chunk_size) != chunk_size) {
+					DOLOG(logger::ll_debug, "Short write on \"%s\"", local_file.c_str());
+					break;
+				}
 			}
 
 			length -= chunk_size;
@@ -293,7 +359,13 @@ void process_http_request(http_session_t *const session)
 
 	close(fd);
 
-	send_func(session, nullptr, 0);  // send FIN
+	sleep(1);
+
+	if (session->ssl)
+		wolfSSL_free(session->ssl);
+	sleep(1);
+
+	fin_func(session);  // send FIN
 
 	session->finished = true;
 }
@@ -312,7 +384,7 @@ void push_meta_reply(shm_message_queue *const shm_meta, const std::string & to, 
 void run_in(shm_message_queue *const shm, const std::string & out_name,
 		std::map<uint64_t, std::pair<std::thread *, http_session_t *> > *const sessions, std::mutex & sessions_lock,
 		shm_message_queue *const shm_meta,
-		const bool is_tls)
+		WOLFSSL_CTX *const ctx)
 {
 	set_thread_name("run_in");
 
@@ -378,7 +450,7 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 					hs = new http_session_t(
 							session_id, out_name, shm,
 							addr_ip4(from, from_len), from_port,
-							addr_ip4(to, to_len), to_port, is_tls);
+							addr_ip4(to, to_len), to_port, ctx);
 					std::thread *th = new std::thread([hs] { process_http_request(hs); });
 					auto rc = sessions->insert({ session_id, { th, hs } }).second;
 					assert(rc);
@@ -480,9 +552,9 @@ void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, std::pair<st
 void run(shm_message_queue *const shm, const std::string & out_name,
 		shm_message_queue *const shm_meta,
 		std::map<uint64_t, std::pair<std::thread *, http_session_t *> > *const sessions, std::mutex & sessions_lock,
-		const bool is_tls)
+		WOLFSSL_CTX *const tls_ctx)
 {
-	std::thread rx  ([&] { run_in  (shm, out_name, sessions, sessions_lock, shm_meta, is_tls); });
+	std::thread rx  ([&] { run_in  (shm, out_name, sessions, sessions_lock, shm_meta, tls_ctx); });
 	std::thread meta([&] { run_meta(shm_meta,      sessions, sessions_lock); });
 	meta.join();
 	rx.join();
@@ -506,6 +578,9 @@ int main(int argc, char *argv[])
 
 	DOLOG(logger::ll_info, "HTTP server starting...");
 
+        wolfSSL_Init();
+        wolfSSL_Debugging_ON();
+
 	dictionary *d = iniparser_load(cfg_file.c_str());
 	for(int i=0; i<iniparser_getnsec(d); i++) {
 		std::string section_name = iniparser_getsecname(d, i);
@@ -514,12 +589,12 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 	}
-	std::string name = iniparser_getstring(d, "global:lower-in-name",  "");
+	std::string name = iniparser_getstring(d, "global:lower-in-name", "");
 	if (name.empty()) {
 		fprintf(stderr, "\"lower-in-name\" under \"global\" missing\n");
 		return 1;
 	}
-	std::string out_name = iniparser_getstring(d, "global:out-name",  "");
+	std::string out_name = iniparser_getstring(d, "global:out-name", "");
 	if (out_name.empty()) {
 		fprintf(stderr, "\"out-name\" under \"global\" missing\n");
 		return 1;
@@ -536,6 +611,8 @@ int main(int argc, char *argv[])
 	}
 	int msg_queue_size_meta = iniparser_getint(d, "specific:meta-queue-size", 512);
 	int is_tls = iniparser_getboolean(d, "specific:enable-tls", false);
+	std::string https_certificate_file = iniparser_getstring(d, "specific:certificate-file", "");
+	std::string https_private_key_file = iniparser_getstring(d, "specific:private-key-file", "");
 	iniparser_freedict(d);
 
 	signal(SIGINT, sig_handler);
@@ -551,9 +628,32 @@ int main(int argc, char *argv[])
 	std::map<uint64_t, std::pair<std::thread *, http_session_t *> > sessions;
 	std::mutex sessions_lock;
 
-	run(shm, out_name, shm_meta, &sessions, sessions_lock, is_tls);
+	WOLFSSL_METHOD *method = wolfSSLv23_server_method();
+	WOLFSSL_CTX    *ctx    = wolfSSL_CTX_new(method);
+
+	if (is_tls) {
+		if (wolfSSL_CTX_use_certificate_file(ctx, https_certificate_file.c_str(), SSL_FILETYPE_PEM) != WOLFSSL_SUCCESS) {
+			fprintf(stderr, "Can't load server cert file\n");
+			return 1;
+		}
+
+		if (wolfSSL_CTX_use_PrivateKey_file(ctx, https_private_key_file.c_str(), SSL_FILETYPE_PEM) != WOLFSSL_SUCCESS) {
+			fprintf(stderr, "Can't load server private key file\n");
+			return 1;
+		}
+
+		wolfSSL_SetIORecv(ctx, my_wolfssl_receive);
+		wolfSSL_SetIOSend(ctx, my_wolfssl_send   );
+	}
+
+	run(shm, out_name, shm_meta, &sessions, sessions_lock, is_tls ? ctx : nullptr);
+
+	if (ctx)
+		wolfSSL_CTX_free(ctx);
 
 	delete shm;
+
+        wolfSSL_Cleanup();
 
 	return 0;
 }

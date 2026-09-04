@@ -4,6 +4,7 @@
 * cmake
 * c++ compiler (23)
 * graphviz
+* libwolfssl-dev
 
 ## compile
 

@@ -181,3 +181,8 @@ target_compile_options(time_server PUBLIC ${INI_CFLAGS_OTHER})
 target_link_libraries(udp_server ${INI_LIBRARIES})
 target_include_directories(udp_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(udp_server PUBLIC ${INI_CFLAGS_OTHER})
+
+pkg_check_modules(WOLFTLS REQUIRED wolfssl)
+target_link_libraries(http_server ${WOLFTLS_LIBRARIES})
+target_include_directories(http_server PUBLIC ${WOLFTLS_INCLUDE_DIRS})
+target_compile_options(http_server PUBLIC ${WOLFTLS_CFLAGS_OTHER})
