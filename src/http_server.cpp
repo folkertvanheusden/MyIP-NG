@@ -144,7 +144,8 @@ bool send_http_header(http_session_t *const session, const int which, const size
 
 void access_log(const http_session_t *const hs, const std::string & url, const int code)
 {
-	DOLOG(logger::ll_info, "HTTP GET(%d) by [%s]:%d: %s",
+	DOLOG(logger::ll_info, "HTTP%s GET(%d) by [%s]:%d: %s",
+			hs->ssl ? "S":"",
 			code,
 			hs->from.to_str('.', false).c_str(), hs->from_port,
 			url.c_str());
