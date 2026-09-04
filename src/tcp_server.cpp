@@ -69,11 +69,10 @@ struct tcp_data
 		std::unique_lock<std::mutex> lck(lock);
 		assert(n_bytes <= len);
 		size_t n_left = len - n_bytes;
-		if (n_left > 0) {
+		if (n_left > 0)
 			memmove(&p[0], &p[n_bytes], n_left);
-			len             -= n_bytes;
-			tcp_sequence_nr += n_bytes;
-		}
+		len             -= n_bytes;
+		tcp_sequence_nr += n_bytes;
 	}
 
 	void add(const uint8_t *const what, const size_t n_bytes) {
@@ -464,6 +463,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				if (ack_seq_nr >= session->local_seq && ack_n <= session->in_flight) {
 					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ACK %u bytes", session_id, ack_n);
 					session->l7_to_tcp.forget(ack_n);
+					DOLOG(logger::ll_debug, "DBG) Session %" PRIx64 " %zu bytes left", session_id, session->l7_to_tcp.len);
 					session->local_seq += ack_n;
 					session->in_flight -= ack_n;
 				}
