@@ -323,10 +323,8 @@ void process_http_request(http_session_t *const session)
 			DOLOG(logger::ll_debug, "\"%s\" is an unkown file type", ext.c_str());
 	}
 
-	sleep(1);
 	auto length { st.st_size };
 	if (send_http_header(session, 200, length, "Ok!", mime_type)) {
-	sleep(1);
 		uint8_t buffer[4096];
 		while(length > 0) {
 			auto chunk_size = std::min(length, long(sizeof buffer));
@@ -358,11 +356,8 @@ void process_http_request(http_session_t *const session)
 
 	close(fd);
 
-	sleep(1);
-
 	if (session->ssl)
 		wolfSSL_free(session->ssl);
-	sleep(1);
 
 	fin_func(session);  // send FIN
 
