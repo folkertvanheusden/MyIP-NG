@@ -351,7 +351,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			}
 		}
 
-		if (header_size > pl_len) {
+		if (size_t(header_size) > pl_len) {
 			free(m);
 			DOLOG(logger::ll_debug, "ERR) TCP header too large");
 			continue;
@@ -549,7 +549,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			DOLOG(logger::ll_debug, "ERR) Session %" PRIx64 " has an unexpected state - pl size: %d, flags: %s", session_id, tcp_pl_size, flags_to_str(flags).c_str());
 		}
 
-		// send data to other end (local shm peer)
+		// send data to local shm peer
 		if (session != nullptr) {
 			if (peer_seq_nr == session->peer_seq) {
 				bool ok = true;
@@ -568,6 +568,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				if (ok) {
 					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 ", data (%d bytes) sent to L7",
 							session_id, tcp_pl_size);
+
 					if (send_tcp_packet(shm, out_name,
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
