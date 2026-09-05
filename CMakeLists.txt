@@ -7,8 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 add_definitions("-D_FILE_OFFSET_BITS=64")
 
-set(CMAKE_BUILD_TYPE RelWithDebInfo)
-#set(CMAKE_BUILD_TYPE Debug)
+#set(CMAKE_BUILD_TYPE RelWithDebInfo)
+set(CMAKE_BUILD_TYPE Debug)
 
 add_compile_options(-Wall)
 
@@ -119,6 +119,12 @@ add_executable(time_server
 	src/time_server.cpp
 	)
 
+add_executable(vnc_server
+	src/common.cpp
+	src/font.cpp
+	src/vnc_server.cpp
+	)
+
 add_custom_command(OUTPUT ${CMAKE_SOURCE_DIR}/www/setup.svg
     COMMAND dot -Tsvg ${CMAKE_SOURCE_DIR}/docs/setup.gv -o ${CMAKE_SOURCE_DIR}/www/setup.svg
     DEPENDS ${CMAKE_SOURCE_DIR}/docs/setup.gv
@@ -143,6 +149,7 @@ target_link_libraries(tcp_server shm log misc)
 target_link_libraries(tcp_test shm log)
 target_link_libraries(time_server shm log misc)
 target_link_libraries(udp_server shm log misc)
+target_link_libraries(vnc_server shm log misc)
 
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
@@ -182,6 +189,19 @@ target_compile_options(time_server PUBLIC ${INI_CFLAGS_OTHER})
 target_link_libraries(udp_server ${INI_LIBRARIES})
 target_include_directories(udp_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(udp_server PUBLIC ${INI_CFLAGS_OTHER})
+target_link_libraries(vnc_server ${INI_LIBRARIES})
+target_include_directories(vnc_server PUBLIC ${INI_INCLUDE_DIRS})
+target_compile_options(vnc_server PUBLIC ${INI_CFLAGS_OTHER})
+
+pkg_check_modules(ZLIB REQUIRED zlib)
+target_link_libraries(vnc_server ${ZLIB_LIBRARIES})
+target_include_directories(vnc_server PUBLIC ${ZLIB_INCLUDE_DIRS})
+target_compile_options(vnc_server PUBLIC ${ZLIB_CFLAGS_OTHER})
+
+pkg_check_modules(LIBJPEG REQUIRED libturbojpeg)
+target_link_libraries(vnc_server ${LIBJPEG_LIBRARIES})
+target_include_directories(vnc_server PUBLIC ${LIBJPEG_INCLUDE_DIRS})
+target_compile_options(vnc_server PUBLIC ${LIBJPEG_CFLAGS_OTHER})
 
 pkg_check_modules(WOLFTLS REQUIRED wolfssl)
 target_link_libraries(http_server ${WOLFTLS_LIBRARIES})
