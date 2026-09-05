@@ -111,8 +111,8 @@ struct session_t {
 	tcp_data    tcp_to_l7;
 	tcp_data    l7_to_tcp;
 	bool        l7_send_fin;  // L7 wants to end session
-	size_t      in_flight;  // limitted by local_window_size
 	bool        fin_sent;
+	size_t      in_flight;  // limitted by local_window_size
 };
 
 std::atomic_bool stop_flag { false };
@@ -495,8 +495,8 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				}
 
 				if (resend) {
+					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " reset \"in flight\"");
 					session->in_flight = 0;  // resend
-					session->fin_sent  = false;
 				}
 
 				sessions_cv.notify_all();
@@ -697,13 +697,14 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 						break;
 					}
 
-					session.second->fin_sent |= sent_n == ssize_t(got_n) ? send_fin : false;
-					session.second->in_flight = sent_n;
-
-					if (send_fin) {
+					bool set_fin_flag = sent_n == ssize_t(got_n) ? send_fin : false;
+					if (set_fin_flag == true && session.second->fin_sent == false) {
 						session.second->local_seq++;
-						DOLOG(logger::ll_debug, "DBG) FIN: increase local sequence number to %u", session.second->local_seq);
+						session.second->fin_sent = true;
+						DOLOG(logger::ll_debug, "DBG) FIN: %" PRIx64 " increase local sequence number to %u", session.first, session.second->local_seq);
 					}
+
+					session.second->in_flight = sent_n;
 				}
 			}
 
@@ -736,7 +737,8 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 			std::unique_lock<std::shared_mutex> lck(sessions_lock);
 			auto it = sessions->find(session_id);
 			if (it != sessions->end()) {
-				it->second->l7_to_tcp.add(&m->data[12], m->size - 12);
+				if (m->size > 12)
+					it->second->l7_to_tcp.add(&m->data[12], m->size - 12);
 				if (flags & 1)
 					it->second->l7_send_fin = true;
 				DOLOG(logger::ll_debug, "DBG) session %" PRIx64 ": send %u bytes%s",
