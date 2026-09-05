@@ -695,7 +695,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 						break;
 					}
 
-					session.second->fin_sent |= sent_n == got_n ? send_fin : false;
+					session.second->fin_sent |= sent_n == ssize_t(got_n) ? send_fin : false;
 					session.second->in_flight = sent_n;
 
 					if (send_fin) {
