@@ -442,9 +442,10 @@ void run_out(shm_message_queue *const shm, const std::pair<addr_ip4, int> & list
 					// goto should be an option here
 				}
 				else {
-					DOLOG(logger::ll_debug, "Sending IP4 fragment(s) for %s -> %s",
+					DOLOG(logger::ll_debug, "Sending IP4 fragment(s) for %s -> %s, latency: %.6f",
 							addr(from, from_len).to_str('.', false).c_str(),
-							addr(to,   to_len  ).to_str('.', false).c_str());
+							addr(to,   to_len  ).to_str('.', false).c_str(),
+							(get_us() - pending_msg_meta->ts) / 1'000'000.);
 
 					uint16_t packets_id = 0;
 					my_random(&packets_id, sizeof packets_id);
