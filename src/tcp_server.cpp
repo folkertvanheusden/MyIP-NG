@@ -279,6 +279,22 @@ ssize_t send_tcp_packet(shm_message_queue *const shm, const std::string & down,
 	return n_sent;
 }
 
+void send_syn_cookie(shm_message_queue *const shm, const std::string & out_name,
+		const uint64_t session_id, const uint8_t syn_cookie_salt[16], const int mss_index,
+		const addr_ip4 & from, const uint16_t source_port, const addr_ip4 & to, const uint16_t destination_port,
+		const uint32_t peer_seq_nr)
+{
+	uint32_t syn_cookie = my_syn_cookie(session_id, syn_cookie_salt, mss_index);
+	DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " using SYN cookie %08x, acking to %08x",
+			session_id, syn_cookie, peer_seq_nr);
+
+	send_tcp_packet(shm, out_name,
+			to, from,  // swapped: reply
+			destination_port, source_port,  // swapped: reply
+			syn_cookie, peer_seq_nr + 1,
+			FLAG_SYN | FLAG_ACK, INITIAL_LOCAL_WINDOW_SIZE, { nullptr, 0 }, MI_IP4_MIN_TCP_MTU);
+}
+
 // ip -> tcp
 void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> & mappings_in, const std::string & icmp_error_name,
 	    const std::string & out_name,
@@ -447,8 +463,11 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					}
 				}
 				else {
-					DOLOG(logger::ll_debug, "ERR) Received SYN for session %" PRIx64 " in ESTABLISHED state -> RST", session_id);
-					invalid = true;
+					DOLOG(logger::ll_debug, "ERR) Received SYN for session %" PRIx64 " in ESTABLISHED state", session_id);
+					send_syn_cookie(shm, out_name,
+							session_id, syn_cookie_salt, mss_index,
+							a_from, source_port, a_to, destination_port,
+							peer_seq_nr);
 				}
 			}
 			else {  // new session
@@ -463,15 +482,10 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					invalid_w_rst = !(flags & FLAG_RST);  // no RST if the flags already contain RST
 				}
 				else {
-					uint32_t syn_cookie = my_syn_cookie(session_id, syn_cookie_salt, mss_index);
-					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " using SYN cookie %08x, acking to %08x",
-							session_id, syn_cookie, peer_seq_nr);
-
-					send_tcp_packet(shm, out_name,
-							a_to, a_from,  // swapped: reply
-							destination_port, source_port,  // swapped: reply
-							syn_cookie, peer_seq_nr + 1,
-							FLAG_SYN | FLAG_ACK, window_size, { nullptr, 0 }, MI_IP4_MIN_TCP_MTU);
+					send_syn_cookie(shm, out_name,
+							session_id, syn_cookie_salt, mss_index,
+							a_from, source_port, a_to, destination_port,
+							peer_seq_nr);
 				}
 			}
 		}
