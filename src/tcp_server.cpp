@@ -37,7 +37,7 @@ extern "C" {
 #define FLAG_SYN (1 << 1)
 #define FLAG_FIN (1 << 0)
 
-#define INITIAL_LOCAL_WINDOW_SIZE 49152
+#define INITIAL_LOCAL_WINDOW_SIZE 32768
 
 enum tcp_state_t { listen, syn_sent, syn_received, established, fin_wait_1, fin_wait_2, close_wait, closing, last_ack, time_wait, closed };
 
@@ -228,39 +228,53 @@ uint32_t my_syn_cookie(const uint64_t session_id, const uint8_t syn_cookie_salt[
 bool send_tcp_packet(shm_message_queue *const shm, const std::string & down,
 		const addr & from, const addr & to,
 		const int src_port, const int dst_port, const uint32_t seq_nr, const uint32_t ack_nr,
-		const int flags, const uint16_t window_size, const std::pair<const uint8_t *, size_t> & payload)
+		const int flags, const uint16_t window_size, const std::pair<const uint8_t *, size_t> & payload,
+		const uint16_t mss)
 {
-	size_t   packet_length = 20 + payload.second;
-	uint8_t *packet        = new uint8_t[packet_length]();
+	const uint8_t *p         = payload.first;
+	size_t         len_in    = payload.second;
+	uint32_t       local_seq = seq_nr;
 
-	put_uint16(&packet[0], src_port);
-	put_uint16(&packet[2], dst_port);
-	put_uint32(&packet[4], seq_nr  );
-	put_uint32(&packet[8], ack_nr  );
-	packet[12] = 5 << 4;  // header size
-	packet[13] = flags;
-	put_uint16(&packet[14], window_size);
-	if (payload.second)
-		memcpy(&packet[20], payload.first, payload.second);
+	do {
+		size_t   use_n         = std::min(len_in, size_t(mss));
+		size_t   packet_length = 20 + use_n;
+		uint8_t *packet        = new uint8_t[packet_length]();
 
-	uint16_t checksum = tcp_udp_checksum(from, to, packet, packet_length, 6);
-	put_uint16(&packet[16], checksum);
+		put_uint16(&packet[0], src_port );
+		put_uint16(&packet[2], dst_port );
+		put_uint32(&packet[4], local_seq);
+		put_uint32(&packet[8], ack_nr   );
+		packet[12] = 5 << 4;  // header size
+		packet[13] = flags;
+		put_uint16(&packet[14], window_size);
+		if (use_n) {
+			memcpy(&packet[20], p, use_n);
+			p         += use_n;
+			local_seq += use_n;
+			len_in    -= use_n;
+		}
 
-	auto *wrapped = wrap_message_down(
-			from.length(), from.get(),
-			to.length(),   to.get(),
-			packet_length, packet,
-			{ });
+		uint16_t checksum = tcp_udp_checksum(from, to, packet, packet_length, 6);
+		put_uint16(&packet[16], checksum);
 
-	bool rc = shm->send_message(down, wrapped, false);
-	if (rc == false)
-		DOLOG(logger::ll_warning, "ERR) Cannot send to %s", down.c_str());
+		auto *wrapped = wrap_message_down(
+				from.length(), from.get(),
+				to.length(),   to.get(),
+				packet_length, packet,
+				{ });
 
-	free(wrapped);
+		bool rc = shm->send_message(down, wrapped, false);
+		free(wrapped);
+		delete [] packet;
 
-	delete [] packet;
+		if (rc == false) {
+			DOLOG(logger::ll_warning, "ERR) Cannot send to %s", down.c_str());
+			return false;
+		}
+	}
+	while(len_in > 0);
 
-	return rc;
+	return true;
 }
 
 // ip -> tcp
@@ -411,7 +425,8 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 								a_to, a_from,  // swapped: reply
 								destination_port, source_port,  // swapped: reply
 								session->local_seq, session->peer_seq,
-								FLAG_ACK, session->local_window_size, { nullptr, 0 }) == false)
+								FLAG_ACK, session->local_window_size, { nullptr, 0 },
+								session->mss) == false)
 						{
 							clean_session = true;
 							DOLOG(logger::ll_debug, "ERR) Could not send ACK for client session %" PRIx64, session_id);
@@ -443,7 +458,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
 							syn_cookie, peer_seq_nr + 1,
-							FLAG_SYN | FLAG_ACK, window_size, { nullptr, 0 });
+							FLAG_SYN | FLAG_ACK, window_size, { nullptr, 0 }, MI_IP4_MIN_TCP_MTU);
 				}
 			}
 		}
@@ -493,7 +508,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
 							syn_cookie + 1, peer_seq_nr,
-							FLAG_RST, window_size, { nullptr, 0 });
+							FLAG_RST, window_size, { nullptr, 0 }, MI_IP4_MIN_TCP_MTU);
 				}
 				else if (auto it = mappings_in.find(destination_port); it != mappings_in.end()) {
 					// send 'open' to shm server
@@ -540,7 +555,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 								a_to, a_from,  // swapped: reply
 								destination_port, source_port,  // swapped: reply
 								syn_cookie, peer_seq_nr,
-								FLAG_RST, window_size, { nullptr, 0 });
+								FLAG_RST, window_size, { nullptr, 0 }, MI_IP4_MIN_TCP_MTU);
 					}
 				}
 			}
@@ -573,7 +588,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
 							session->local_seq, session->peer_seq + tcp_pl_size,
-							FLAG_ACK, session->local_window_size, { nullptr, 0 })) {
+							FLAG_ACK, session->local_window_size, { nullptr, 0 }, session->mss)) {
 						session->peer_seq += tcp_pl_size;
 					}
 					else
@@ -594,7 +609,8 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
 							session->local_seq, session->peer_seq,
-							FLAG_ACK, session->local_window_size, { nullptr, 0 }) == false) {
+							FLAG_ACK, session->local_window_size, { nullptr, 0 },
+							session->mss) == false) {
 					clean_session = true;
 					DOLOG(logger::ll_debug, "ERR) Could not ACK data for session %" PRIx64, session_id);
 				}
@@ -614,7 +630,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						a_to, a_from,  // swapped: reply
 						destination_port, source_port,  // swapped: reply
 						session ? session->local_seq : 0, session ? peer_seq_nr + invalid_inc_ack : 0,
-						FLAG_RST, window_size, { nullptr, 0 });
+						FLAG_RST, window_size, { nullptr, 0 }, session->mss);
 			}
 
 			if (session) {
@@ -645,7 +661,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 		set_thread_name("run_out::sender");
 		std::unique_lock<std::shared_mutex> lck(sessions_lock);
 
-		uint8_t buffer[INITIAL_LOCAL_WINDOW_SIZE];
+		uint8_t buffer[65536];
 
 		while(!stop_flag) {
 			for(auto & session: *sessions) {
@@ -673,7 +689,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 								session.second->local_seq,  session.second->peer_seq,
 								(send_fin ? FLAG_FIN : 0) | FLAG_ACK | FLAG_PSH,
 								session.second->local_window_size,
-								{ buffer, got_n }) == false) {
+								{ buffer, got_n }, session.second->mss) == false) {
 						     // something is wrong, logged about by send_tcp_packet itself
 						     break;
 					}
@@ -839,7 +855,8 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 							new_session->local_addr, new_session->peer_addr,
 							new_session->local_port, new_session->peer_port,
 							new_session->local_seq, new_session->peer_seq,
-							FLAG_SYN, new_session->local_window_size, { nullptr, 0 });
+							FLAG_SYN, new_session->local_window_size, { nullptr, 0 },
+							MI_IP4_MIN_TCP_MTU);
 
 					// return new session_id
 					if (!failed) {
@@ -895,7 +912,8 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 							fin_session->local_addr, fin_session->peer_addr,
 							fin_session->local_port, fin_session->peer_port,
 							fin_session->local_seq + 1,  fin_session->peer_seq,
-							FLAG_FIN, fin_session->local_window_size, { nullptr, 0 });
+							FLAG_FIN, fin_session->local_window_size, { nullptr, 0 },
+							MI_IP4_MIN_TCP_MTU);
 
 					delete fin_session;
 				}
