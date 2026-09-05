@@ -83,6 +83,7 @@ add_executable(arp_server
 	)
 
 add_executable(ip4_server
+	src/3dparty/SipHash/siphash.c
 	src/common.cpp
 	src/ip4_server.cpp
 	)

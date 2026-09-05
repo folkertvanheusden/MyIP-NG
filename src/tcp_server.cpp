@@ -204,10 +204,14 @@ static uint64_t calc_session_id(const uint16_t src_port, const uint16_t dst_port
 	from.get(&session_id_buffer[4]);
 	to  .get(&session_id_buffer[4 + from_len]);
 
-	auto rc = fletcher64(session_id_buffer, session_id_buffer_len);
+	constexpr const uint8_t  session_id_salt[16] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10 };
+
+	uint32_t sip_out[2] { };
+	siphash(session_id_buffer, session_id_buffer_len, session_id_salt, reinterpret_cast<uint8_t *>(sip_out), sizeof sip_out);
+
 	delete [] session_id_buffer;
 
-	return rc;
+	return (uint64_t(sip_out[0]) << 32) | sip_out[1];
 }
 
 uint32_t my_syn_cookie(const uint64_t session_id, const uint8_t syn_cookie_salt[16], const int mss_index)
