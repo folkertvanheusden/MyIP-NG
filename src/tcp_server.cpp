@@ -581,17 +581,19 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 ", data (%d bytes) sent to L7",
 							session_id, tcp_pl_size);
 
-					if (send_tcp_packet(shm, out_name,
-							a_to, a_from,  // swapped: reply
-							destination_port, source_port,  // swapped: reply
-							session->local_seq, session->peer_seq + tcp_pl_size,
-							FLAG_ACK, session->local_window_size, { nullptr, 0 }, session->mss) == 0) {
-						session->peer_seq += tcp_pl_size;
-					}
-					else
-					{
-						clean_session = true;
-						DOLOG(logger::ll_debug, "ERR) Could not ACK data for session %" PRIx64, session_id);
+					if ((flags & FLAG_ACK) == 0 || tcp_pl_size > 0) {
+						if (send_tcp_packet(shm, out_name,
+								a_to, a_from,  // swapped: reply
+								destination_port, source_port,  // swapped: reply
+								session->local_seq, session->peer_seq + tcp_pl_size,
+								FLAG_ACK, session->local_window_size, { nullptr, 0 }, session->mss) == 0) {
+							session->peer_seq += tcp_pl_size;
+						}
+						else
+						{
+							clean_session = true;
+							DOLOG(logger::ll_debug, "ERR) Could not ACK data for session %" PRIx64, session_id);
+						}
 					}
 				}
 				else {
