@@ -480,7 +480,7 @@ void process_vnc_request(vnc_session_t *const session, frame_buffer *const fb)
 {
 	set_thread_name("vnc-session");
 
-	DOLOG(logger::ll_debug, "VNC handler running for session %" PRIx64, session->session_id);
+	DOLOG(logger::ll_info, "VNC handler running for session %" PRIx64, session->session_id);
 
 	session->jpeg_compressor = tjInitCompress();
 
