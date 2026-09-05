@@ -1,0 +1,3 @@
+This Gopher server runs on "MyIP(-NG)", a simple IP stack.
+This set of programs forms an IP-stack fully running in userspace. Most of it runs as a regular user even.
+See <a href="https://vanheusden.com/networking/MyIP/">the vanheusden.com website</a> for more info.

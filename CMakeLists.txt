@@ -109,6 +109,11 @@ add_executable(ntp_server
 	src/ntp_server.cpp
 	)
 
+add_executable(gopher_server
+	src/common.cpp
+	src/gopher_server.cpp
+	)
+
 add_executable(http_server
 	src/common.cpp
 	src/http_server.cpp
@@ -136,6 +141,7 @@ target_link_libraries(addresses_test log)
 target_link_libraries(arp_server shm log misc)
 target_link_libraries(arp_test shm log)
 target_link_libraries(checksum_test log misc)
+target_link_libraries(gopher_server shm log misc)
 target_link_libraries(http_server shm log misc)
 target_link_libraries(icmp_server shm log misc)
 target_link_libraries(ip4_server shm log misc)
@@ -162,6 +168,9 @@ pkg_check_modules(INI REQUIRED iniparser)
 target_link_libraries(arp_server ${INI_LIBRARIES})
 target_include_directories(arp_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(arp_server PUBLIC ${INI_CFLAGS_OTHER})
+target_link_libraries(gopher_server ${INI_LIBRARIES})
+target_include_directories(gopher_server PUBLIC ${INI_INCLUDE_DIRS})
+target_compile_options(gopher_server PUBLIC ${INI_CFLAGS_OTHER})
 target_link_libraries(http_server ${INI_LIBRARIES})
 target_include_directories(http_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(http_server PUBLIC ${INI_CFLAGS_OTHER})
