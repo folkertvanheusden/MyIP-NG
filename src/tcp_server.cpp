@@ -508,12 +508,12 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					session->in_flight -= ack_n;
 				}
 				else {
-					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ACK out of range");
+					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ACK out of range", session_id);
 					resend = true;
 				}
 
 				if (resend) {
-					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " reset \"in flight\"");
+					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " reset \"in flight\"", session_id);
 					session->in_flight = 0;  // resend
 				}
 
