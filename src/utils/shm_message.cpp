@@ -78,9 +78,10 @@ shm_message_queue::message * wrap_message_up_tcp(
 	p->flags        = flags;
 	p->pl_len       = pl_len;
 	p->session_id   = session_id;
-	memcpy(&p->data[0],                          from,     from_len    );
-	memcpy(&p->data[from_len],                   to,       to_len      );
-	memcpy(&p->data[from_len + to_len],          pl,       pl_len      );
+	memcpy(&p->data[0],        from, from_len);
+	memcpy(&p->data[from_len], to,   to_len  );
+	if (pl_len)
+		memcpy(&p->data[from_len + to_len], pl, pl_len);
 
 	return msg;
 }
