@@ -489,11 +489,6 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					resend = true;
 				}
 
-				if ((flags & FLAG_FIN) && session->in_flight > 0) {
-					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " FIN received with unacked data, resending");
-					resend = true;
-				}
-
 				if (resend) {
 					session->in_flight = 0;  // resend
 					session->fin_sent  = false;
