@@ -398,6 +398,17 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		bool invalid_inc_ack = false;  // set when a processing a SYN
 		bool clean_session   = false;
 
+
+		if (session) {
+			if (flags & FLAG_FIN) {
+				DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " FIN flag", session_id);
+				if (session->half_closed == false) {
+					session->peer_seq++;
+					session->half_closed = true;
+				}
+			}
+		}
+
 		if (flags & FLAG_RST) {
 			clean_session = true;
 			DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ": RST by peer");
@@ -466,14 +477,6 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		}
 		else if (flags & FLAG_ACK) {
 			if (session) {
-				if (flags & FLAG_FIN) {
-					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " FIN flag", session_id);
-					if (session->half_closed == false) {
-						session->peer_seq++;
-						session->half_closed = true;
-					}
-				}
-
 				// ack of pending data
 				bool     resend = false;
 				uint32_t ack_n  = ack_seq_nr - session->local_seq;
