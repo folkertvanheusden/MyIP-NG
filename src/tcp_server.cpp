@@ -630,7 +630,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						a_to, a_from,  // swapped: reply
 						destination_port, source_port,  // swapped: reply
 						session ? session->local_seq : 0, session ? peer_seq_nr + invalid_inc_ack : 0,
-						FLAG_RST, window_size, { nullptr, 0 }, session->mss);
+						FLAG_RST, window_size, { nullptr, 0 }, MI_IP4_MIN_TCP_MTU);
 			}
 
 			if (session) {
