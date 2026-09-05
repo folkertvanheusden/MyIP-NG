@@ -5,6 +5,7 @@
 * c++ compiler (23)
 * graphviz
 * libwolfssl-dev
+* libturbojpeg-dev
 
 ## compile
 
