@@ -225,7 +225,7 @@ uint32_t my_syn_cookie(const uint64_t session_id, const uint8_t syn_cookie_salt[
 	return (s & 0xFFFFFF00) | (t << 3) | mss_index;
 }
 
-bool send_tcp_packet(shm_message_queue *const shm, const std::string & down,
+ssize_t send_tcp_packet(shm_message_queue *const shm, const std::string & down,
 		const addr & from, const addr & to,
 		const int src_port, const int dst_port, const uint32_t seq_nr, const uint32_t ack_nr,
 		const int flags, const uint16_t window_size, const std::pair<const uint8_t *, size_t> & payload,
@@ -234,6 +234,7 @@ bool send_tcp_packet(shm_message_queue *const shm, const std::string & down,
 	const uint8_t *p         = payload.first;
 	size_t         len_in    = payload.second;
 	uint32_t       local_seq = seq_nr;
+	ssize_t        n_sent    = 0;
 
 	do {
 		size_t   use_n         = std::min(len_in, size_t(mss));
@@ -252,6 +253,7 @@ bool send_tcp_packet(shm_message_queue *const shm, const std::string & down,
 			p         += use_n;
 			local_seq += use_n;
 			len_in    -= use_n;
+			n_sent    += use_n;
 		}
 
 		uint16_t checksum = tcp_udp_checksum(from, to, packet, packet_length, 6);
@@ -269,12 +271,12 @@ bool send_tcp_packet(shm_message_queue *const shm, const std::string & down,
 
 		if (rc == false) {
 			DOLOG(logger::ll_warning, "ERR) Cannot send to %s", down.c_str());
-			return false;
+			return n_sent > 0 ? n_sent : -1;
 		}
 	}
 	while(len_in > 0);
 
-	return true;
+	return n_sent;
 }
 
 // ip -> tcp
@@ -426,7 +428,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 								destination_port, source_port,  // swapped: reply
 								session->local_seq, session->peer_seq,
 								FLAG_ACK, session->local_window_size, { nullptr, 0 },
-								session->mss) == false)
+								session->mss) == -1)
 						{
 							clean_session = true;
 							DOLOG(logger::ll_debug, "ERR) Could not send ACK for client session %" PRIx64, session_id);
@@ -588,7 +590,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
 							session->local_seq, session->peer_seq + tcp_pl_size,
-							FLAG_ACK, session->local_window_size, { nullptr, 0 }, session->mss)) {
+							FLAG_ACK, session->local_window_size, { nullptr, 0 }, session->mss) == 0) {
 						session->peer_seq += tcp_pl_size;
 					}
 					else
@@ -610,7 +612,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 							destination_port, source_port,  // swapped: reply
 							session->local_seq, session->peer_seq,
 							FLAG_ACK, session->local_window_size, { nullptr, 0 },
-							session->mss) == false) {
+							session->mss) == -1) {
 					clean_session = true;
 					DOLOG(logger::ll_debug, "ERR) Could not ACK data for session %" PRIx64, session_id);
 				}
@@ -672,8 +674,6 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 				size_t use_n    = std::min(sizeof buffer, size_t(session.second->mss));
 				bool   end      = session.second->l7_to_tcp.peek(use_n, buffer, &got_n);
 				bool   send_fin = end ? session.second->l7_send_fin : false;
-				session.second->in_flight = got_n;
-				session.second->fin_sent |= send_fin;
 
 				if (got_n > 0 || send_fin) {
 					DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", local seq nr: %s",
@@ -683,16 +683,20 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 							"INF) TCP sent packet to %s for session %" PRIx64 " (%d bytes%s)",
 							out_name.c_str(), session.first, got_n, send_fin ? " +FIN" : "");
 
-					if (send_tcp_packet(shm_out, out_name,
+					auto sent_n = send_tcp_packet(shm_out, out_name,
 								session.second->local_addr, session.second->peer_addr,
 								session.second->local_port, session.second->peer_port,
 								session.second->local_seq,  session.second->peer_seq,
 								(send_fin ? FLAG_FIN : 0) | FLAG_ACK | FLAG_PSH,
 								session.second->local_window_size,
-								{ buffer, got_n }, session.second->mss) == false) {
-						     // something is wrong, logged about by send_tcp_packet itself
-						     break;
+								{ buffer, got_n }, session.second->mss);
+					if (sent_n == -1) {
+						// something is wrong, logged about by send_tcp_packet itself
+						break;
 					}
+
+					session.second->fin_sent |= sent_n == got_n ? send_fin : false;
+					session.second->in_flight = sent_n;
 
 					if (send_fin) {
 						session.second->local_seq++;
@@ -853,12 +857,12 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 						new_session->peer_port = dst_port.value();
 
 					// send SYN
-					failed = !send_tcp_packet(shm, out_name,
+					failed = send_tcp_packet(shm, out_name,
 							new_session->local_addr, new_session->peer_addr,
 							new_session->local_port, new_session->peer_port,
 							new_session->local_seq, new_session->peer_seq,
 							FLAG_SYN, new_session->local_window_size, { nullptr, 0 },
-							MI_IP4_MIN_TCP_MTU);
+							MI_IP4_MIN_TCP_MTU) == -1;
 
 					// return new session_id
 					if (!failed) {
