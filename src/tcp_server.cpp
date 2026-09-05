@@ -468,8 +468,10 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			if (session) {
 				if (flags & FLAG_FIN) {
 					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " FIN flag", session_id);
-					session->peer_seq++;
-					session->half_closed = true;
+					if (session->half_closed == false) {
+						session->peer_seq++;
+						session->half_closed = true;
+					}
 				}
 
 				// ack of pending data
