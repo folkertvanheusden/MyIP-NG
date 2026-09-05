@@ -847,8 +847,10 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 					new_session->local_window_size = INITIAL_LOCAL_WINDOW_SIZE;
 					new_session->local_addr        = from_addr;
 					new_session->local_port        = src_port;
-					new_session->peer_addr         = dst_addr.value();
-					new_session->peer_port         = dst_port.value();
+					if (dst_addr.has_value())
+						new_session->peer_addr = dst_addr.value();
+					if (dst_port.has_value())
+						new_session->peer_port = dst_port.value();
 
 					// send SYN
 					failed = !send_tcp_packet(shm, out_name,
