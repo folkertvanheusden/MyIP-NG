@@ -60,9 +60,14 @@ struct http_session_t
 
 std::atomic_bool stop_flag { false };
 
+std::atomic_bool please_terminate { false };
+
 void sig_handler(int sig)
 {
-	stop_flag = true;
+	if (sig == SIGINT)
+		stop_flag = true;
+	if (sig == SIGTERM)
+		please_terminate = true;
 }
 
 void fin_func(http_session_t *const session)
@@ -401,6 +406,13 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 
 			for(auto session: delete_these)
 				sessions->erase(session);
+
+			// used for certificat reloading
+			if (sessions->empty() && please_terminate == true) {
+				stop_flag = true;
+				DOLOG(logger::ll_info, "STOP requested, terminating");
+				continue;
+			}
 		}
 
 		// process incoming data
@@ -609,7 +621,8 @@ int main(int argc, char *argv[])
 	std::string https_private_key_file = iniparser_getstring(d, "specific:private-key-file", "");
 	iniparser_freedict(d);
 
-	signal(SIGINT, sig_handler);
+	signal(SIGINT,  sig_handler);
+	signal(SIGTERM, sig_handler);
 
 	shm_message_queue *shm = create_shm(name, msg_queue_size);
 	if (shm == nullptr)
