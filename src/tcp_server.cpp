@@ -431,7 +431,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 		if (flags & FLAG_RST) {
 			clean_session = true;
-			DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ": RST by peer");
+			DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ": RST by peer", session_id);
 		}
 		else if (flags & FLAG_SYN) {
 			invalid_inc_ack = true;
