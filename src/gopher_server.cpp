@@ -194,8 +194,11 @@ void process_gopher_request(gopher_session_t *const session, const std::string &
 		send_menu(session, base_path, "", false, hostname);
 	}
 	else {
-		char *temp = realpath((base_path + "/" + recv_buffer).c_str(), nullptr);
+		std::string combined = base_path + "/" + recv_buffer;
+		char *temp = realpath(combined.c_str(), nullptr);
 		std::string path = temp?:"";
+		if (!temp)
+			DOLOG(logger::ll_info, "realpath(%s) returned an error: %s\n", combined.c_str(), strerror(errno));
 		free(temp);
 
 		struct stat st { };
@@ -498,6 +501,10 @@ int main(int argc, char *argv[])
 	iniparser_freedict(d);
 
 	char *temp = realpath(base_path.c_str(), nullptr);
+	if (!temp) {
+		fprintf(stderr, "realpath(%s) returned an error: %s\n", base_path.c_str(), strerror(errno));
+		return 1;
+	}
 	base_path = temp;
 	free(temp);
 	DOLOG(logger::ll_info, "Using \"%s\" as base-path", base_path.c_str());
