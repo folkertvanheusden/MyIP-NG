@@ -26,29 +26,16 @@
 #include "utils/shm.h"
 #include "utils/shm_message.h"
 #include "utils/stoi.h"
+#include "utils/tcp-helpers.h"
 
 
-struct gopher_session_t
+struct gopher_session_t: public tcp_l7_session_t
 {
-	const uint64_t    session_id;
-	const std::string out_name;
-	shm_message_queue *const shm;
-	const addr_ip4    from;
-	const uint16_t    from_port;
-	const addr_ip4    to;
-	const uint16_t    to_port;
-
-	std::atomic_bool  finished  { false };
-	std::atomic_bool  stop_flag { false };
-	queue<std::vector<uint8_t> > incoming;
-
 	gopher_session_t(const uint64_t session_id, const std::string & out_name,
 		shm_message_queue *const shm,
 		const addr_ip4 from, const uint16_t from_port,
 		const addr_ip4 to,   const uint16_t to_port):
-		session_id(session_id), out_name(out_name), shm(shm),
-		from(from), from_port(from_port),
-		to  (to  ), to_port  (to_port  )
+		tcp_l7_session_t(session_id, out_name, shm, from, from_port, to, to_port)
 	{
 	}
 };
@@ -58,64 +45,6 @@ std::atomic_bool stop_flag { false };
 void sig_handler(int sig)
 {
 	stop_flag = true;
-}
-
-void fin_func(gopher_session_t *const session)
-{
-	shm_message_queue::message *end_msg = allocate_shm_message(12);
-	memcpy(&end_msg->data[0], &session->session_id, 8);
-	uint32_t flags = MI_TCP_FIN;
-	memcpy(&end_msg->data[8], &flags, 4);
-
-	if (session->shm->send_message(session->out_name, end_msg, true) == false)
-		DOLOG(logger::ll_warning, "Cannot send FIN message to %s", session->out_name.c_str());
-
-	free(end_msg);
-}
-
-int send_func(gopher_session_t *const session, const uint8_t *const from, const size_t n)
-{
-	int rc = -1;
-
-	shm_message_queue::message *data_msg = allocate_shm_message(12 + n);
-	memcpy(&data_msg->data[0], &session->session_id, 8);
-	uint32_t flags = 0;
-	memcpy(&data_msg->data[8], &flags, 4);
-	memcpy(&data_msg->data[12], from, n);
-
-	if (session->shm->send_message(session->out_name, data_msg, true) == false)
-		DOLOG(logger::ll_warning, "Cannot send Gopher headers to %s", session->out_name.c_str());
-	else
-		rc = n;
-
-	free(data_msg);
-
-	return rc;
-}
-
-int recv_func(gopher_session_t *const session, uint8_t *const to, const size_t n)
-{
-	if (n == 0)
-		return 0;
-
-	uint8_t *p    = to;
-	size_t   todo = n;
-	do {
-		auto   values = session->incoming.pop();
-		size_t v_n    = values.size();
-		memcpy(p, values.data(), std::min(todo, v_n));
-
-		if (v_n > todo) {
-			session->incoming.unpop(std::vector<uint8_t>(values.data() + todo, values.data() + v_n));
-			todo = 0;
-		}
-		else {
-			todo -= v_n;
-			p    += v_n;
-		}
-	} while(todo > 0);
-
-	return n;
 }
 
 void access_log(const gopher_session_t *const hs, const std::string & url)
@@ -249,17 +178,6 @@ void process_gopher_request(gopher_session_t *const session, const std::string &
 	fin_func(session);  // send FIN
 
 	session->finished = true;
-}
-
-void push_meta_reply(shm_message_queue *const shm_meta, const std::string & to, const std::string & reply)
-{
-	DOLOG(logger::ll_debug, "Pushing reply to \"%s\"", to.c_str());
-
-	shm_message_queue::message *m_reply = allocate_shm_message(reply.size());
-	m_reply->type   = shm_message_queue::msg_reply;
-	memcpy(m_reply->data, reply.c_str(), m_reply->size);
-	shm_meta->send_message(to, m_reply, true);
-	free(m_reply);
 }
 
 void run_in(shm_message_queue *const shm, const std::string & out_name,

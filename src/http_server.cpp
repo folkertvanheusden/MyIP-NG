@@ -25,34 +25,22 @@
 #include "utils/shm.h"
 #include "utils/shm_message.h"
 #include "utils/stoi.h"
+#include "utils/tcp-helpers.h"
 
 
 const std::string http_base_path = "./www";
 
-struct http_session_t
+struct http_session_t: public tcp_l7_session_t
 {
-	const uint64_t    session_id;
-	const std::string out_name;
-	shm_message_queue *const shm;
-	const addr_ip4    from;
-	const uint16_t    from_port;
-	const addr_ip4    to;
-	const uint16_t    to_port;
 	WOLFSSL_CTX      *const ctx;
 	WOLFSSL          *ssl { nullptr };
-
-	std::atomic_bool  finished  { false };
-	std::atomic_bool  stop_flag { false };
-	queue<std::vector<uint8_t> > incoming;
 
 	http_session_t(const uint64_t session_id, const std::string & out_name,
 		shm_message_queue *const shm,
 		const addr_ip4 from, const uint16_t from_port,
 		const addr_ip4 to,   const uint16_t to_port,
 		WOLFSSL_CTX *const ctx):
-		session_id(session_id), out_name(out_name), shm(shm),
-		from(from), from_port(from_port),
-		to  (to  ), to_port  (to_port  ),
+		tcp_l7_session_t(session_id, out_name, shm, from, from_port, to, to_port),
 		ctx(ctx)
 	{
 	}
@@ -68,69 +56,6 @@ void sig_handler(int sig)
 		stop_flag = true;
 	if (sig == SIGTERM)
 		please_terminate = true;
-}
-
-void fin_func(http_session_t *const session)
-{
-	shm_message_queue::message *end_msg = allocate_shm_message(12);
-	memcpy(&end_msg->data[0], &session->session_id, 8);
-	uint32_t flags = MI_TCP_FIN;
-	memcpy(&end_msg->data[8], &flags, 4);
-
-	if (session->shm->send_message(session->out_name, end_msg, true) == false)
-		DOLOG(logger::ll_warning, "Cannot send FIN message to %s", session->out_name.c_str());
-
-	free(end_msg);
-}
-
-int send_func(http_session_t *const session, const uint8_t *const from, const size_t n)
-{
-	int rc = -1;
-
-	shm_message_queue::message *data_msg = allocate_shm_message(12 + n);
-	memcpy(&data_msg->data[0], &session->session_id, 8);
-	uint32_t flags = 0;
-	memcpy(&data_msg->data[8], &flags, 4);
-	memcpy(&data_msg->data[12], from, n);
-
-	if (session->shm->send_message(session->out_name, data_msg, true) == false)
-		DOLOG(logger::ll_warning, "Cannot send HTTP headers to %s", session->out_name.c_str());
-	else
-		rc = n;
-
-	free(data_msg);
-
-	return rc;
-}
-
-int recv_func(http_session_t *const session, uint8_t *const to, const size_t n)
-{
-	if (n == 0)
-		return 0;
-
-	uint8_t *p    = to;
-	size_t   todo = n;
-	size_t   done = 0;
-	while(todo > 0 && session->stop_flag == false && stop_flag == false) {
-		auto   values = session->incoming.pop(SLEEP_INTERVAL_MS);
-		if (values.has_value() == false)
-			continue;
-		size_t v_n    = values.value().size();
-		memcpy(p, values.value().data(), std::min(todo, v_n));
-
-		if (v_n > todo) {
-			session->incoming.unpop(std::vector<uint8_t>(values.value().data() + todo, values.value().data() + v_n));
-			done += todo;
-			todo = 0;
-		}
-		else {
-			todo -= v_n;
-			p    += v_n;
-			done += v_n;
-		}
-	}
-
-	return done;
 }
 
 bool send_http_header(http_session_t *const session, const int which, const size_t payload_size, const std::string & message, const std::string & mime_type)
@@ -372,17 +297,6 @@ void process_http_request(http_session_t *const session)
 	fin_func(session);  // send FIN
 
 	session->finished = true;
-}
-
-void push_meta_reply(shm_message_queue *const shm_meta, const std::string & to, const std::string & reply)
-{
-	DOLOG(logger::ll_debug, "Pushing reply to \"%s\"", to.c_str());
-
-	shm_message_queue::message *m_reply = allocate_shm_message(reply.size());
-	m_reply->type   = shm_message_queue::msg_reply;
-	memcpy(m_reply->data, reply.c_str(), m_reply->size);
-	shm_meta->send_message(to, m_reply, true);
-	free(m_reply);
 }
 
 void run_in(shm_message_queue *const shm, const std::string & out_name,

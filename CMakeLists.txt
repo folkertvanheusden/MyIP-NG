@@ -112,11 +112,13 @@ add_executable(ntp_server
 add_executable(gopher_server
 	src/common.cpp
 	src/gopher_server.cpp
+	src/utils/tcp-helpers.cpp
 	)
 
 add_executable(http_server
 	src/common.cpp
 	src/http_server.cpp
+	src/utils/tcp-helpers.cpp
 	)
 
 add_executable(time_server
@@ -128,6 +130,7 @@ add_executable(vnc_server
 	src/common.cpp
 	src/font.cpp
 	src/vnc_server.cpp
+	src/utils/tcp-helpers.cpp
 	)
 
 add_custom_command(OUTPUT ${CMAKE_SOURCE_DIR}/www/setup.svg
