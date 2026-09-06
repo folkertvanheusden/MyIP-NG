@@ -195,7 +195,7 @@ void process_gopher_request(gopher_session_t *const session, const std::string &
 	}
 	else {
 		char *temp = realpath((base_path + "/" + recv_buffer).c_str(), nullptr);
-		std::string path = temp;
+		std::string path = temp?:"";
 		free(temp);
 
 		struct stat st { };
