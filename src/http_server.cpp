@@ -260,7 +260,7 @@ void process_http_request(http_session_t *const session)
 	auto length { st.st_size };
 	if (send_http_header(session, 200, length, "Ok!", mime_type)) {
 		uint8_t buffer[4096];
-		while(length > 0 && session->stop_flag == false) {
+		while(length > 0 && session->stop_flag == false && stop_flag == false) {
 			auto chunk_size = std::min(length, long(sizeof buffer));
 			DOLOG(logger::ll_debug, "Sending %lu bytes, %lu left", chunk_size, length);
 
