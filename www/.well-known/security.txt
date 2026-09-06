@@ -1,0 +1,4 @@
+Contact: mailto:folkert@vanheusden.com
+Expires: 2037-12-30T23:00:00.000Z
+Acknowledgments: https://myip-ng.vanheusden.com/security-thanks.html
+Preferred-Languages: en
