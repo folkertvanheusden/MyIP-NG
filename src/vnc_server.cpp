@@ -251,7 +251,6 @@ std::pair<uint8_t *, size_t> calculate_fb_update(frame_buffer *fb, std::vector<i
 		if (e == 5) {  // Hextile
 			ce = e;
 			DOLOG(logger::ll_debug, "VNC: hextile encoding");
-			break;
 		}
 
 		if (e == 6) {  // ZLIB
@@ -263,7 +262,6 @@ std::pair<uint8_t *, size_t> calculate_fb_update(frame_buffer *fb, std::vector<i
 		if (e == 21) {   // JPEG
 			ce = e;
 			DOLOG(logger::ll_debug, "VNC: jpeg encoding");
-			break;
 		}
 	}
 
@@ -417,7 +415,7 @@ void process_vnc_request(vnc_session_t *const session, frame_buffer *const fb)
 		DOLOG(logger::ll_warning, "VNC: zlib init failed");
 	
 	std::vector<int32_t> encodings;
-	encodings.push_back(0);  // at least raw
+//	encodings.push_back(0);  // at least raw
 
 	int  n_encodings        = -1;
 
@@ -625,7 +623,10 @@ void process_vnc_request(vnc_session_t *const session, frame_buffer *const fb)
 				ignore_data_n = (parameters[3] << 24) | (parameters[4] << 16) | (parameters[5] << 8) | parameters[6];
 				DOLOG(logger::ll_debug, "VNC: ClientCutText (ignore %d)", ignore_data_n);
 
-				session->state = vs_running_waiting_data_ignore;
+				if (ignore_data_n)
+					session->state = vs_running_waiting_data_ignore;
+				else
+					session->state = vs_running_waiting_cmd;
 				delete [] parameters;
 			}
 			else {
