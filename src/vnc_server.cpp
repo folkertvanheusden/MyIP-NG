@@ -223,22 +223,27 @@ int recv_func(vnc_session_t *const session, uint8_t *const to, const size_t n)
 
 	uint8_t *p    = to;
 	size_t   todo = n;
-	do {
-		auto   values = session->incoming.pop();
-		size_t v_n    = values.size();
-		memcpy(p, values.data(), std::min(todo, v_n));
+	size_t   done = 0;
+	while(todo > 0 && session->stop_flag == false && stop_flag == false) {
+		auto   values = session->incoming.pop(SLEEP_INTERVAL_MS);
+		if (values.has_value() == false)
+			continue;
+		size_t v_n    = values.value().size();
+		memcpy(p, values.value().data(), std::min(todo, v_n));
 
 		if (v_n > todo) {
-			session->incoming.unpop(std::vector<uint8_t>(values.data() + todo, values.data() + v_n));
+			session->incoming.unpop(std::vector<uint8_t>(values.value().data() + todo, values.value().data() + v_n));
+			done += todo;
 			todo = 0;
 		}
 		else {
 			todo -= v_n;
 			p    += v_n;
+			done += v_n;
 		}
-	} while(todo > 0);
+	}
 
-	return n;
+	return done;
 }
 
 inline void encode_pixel(uint8_t *const out, int *const o, const int depth, const uint8_t r, const uint8_t g, const uint8_t b)
@@ -469,7 +474,8 @@ uint8_t *recv_alloc(vnc_session_t *const session, const size_t n)
 {
 	uint8_t *out = new uint8_t[n];
 	int rc = recv_func(session, out, n);
-	if (rc == -1) {
+	if (rc != n) {  // short read == failure
+		DOLOG(logger::ll_debug, "Expected %zu bytes, got %d", n, rc);
 		delete [] out;
 		return nullptr;
 	}
@@ -495,7 +501,7 @@ void process_vnc_request(vnc_session_t *const session, frame_buffer *const fb)
 	int running_cmd   = -1;
 	int ignore_data_n = -1;
 
-	while(!stop_flag) {
+	while(stop_flag == false && session->stop_flag == false) {
 		bool cont_or_initial_upd_frame = false;
 
 		DOLOG(logger::ll_debug, "VNC: state: %d", session->state);
@@ -515,7 +521,7 @@ void process_vnc_request(vnc_session_t *const session, frame_buffer *const fb)
 			if (!handshake)
 				break;
 
-			std::string handshake_str = std::string(handshake, 12);
+			std::string handshake_str = std::string(handshake, 11);  // skip LF
 
 			if (memcmp(handshake, "RFB", 3) == 0) {  // let's not be too picky
 				DOLOG(logger::ll_debug, "VNC: Client responded with protocol version: %s", handshake_str.c_str());
@@ -591,8 +597,8 @@ void process_vnc_request(vnc_session_t *const session, frame_buffer *const fb)
 				0,  // blue shift (note that alpha is stored in the lowest byte)
 				0, 0, 0,
 				// name length/string
-				0, 0, 0, 7,
-				'M', 'y', 'I', 'P', '-', 'N', 'G'  // no "...": that would include a 0x00
+				0, 0, 0, 8,
+				'M', 'y', 'I', 'P', '(', 'N', 'G', ')'  // no "...": that would include a 0x00
 			};
 
 			DOLOG(logger::ll_debug, "VNC: server init, %zu bytes", sizeof message);
@@ -859,7 +865,6 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 					auto rc = sessions->insert({ session_id, { th, hs } });
 					assert(rc.second);
 				}
-				// TODO MI_TCP_CLOSE
 				else {
 					DOLOG(logger::ll_debug, "Session %" PRIx64 " not known");
 					free(m);
@@ -868,6 +873,11 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 			}
 			else {
 				hs = it->second.second;
+
+				if (flags & MI_TCP_CLOSE) {
+					DOLOG(logger::ll_debug, "Session %" PRIx64 ": close");
+					hs->stop_flag = true;
+				}
 			}
 		}
 

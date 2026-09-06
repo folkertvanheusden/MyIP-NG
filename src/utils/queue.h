@@ -34,13 +34,24 @@ public:
 	T pop(void)
 	{
 		std::unique_lock<std::mutex> lock(m);
-
 		while(q.empty())
 			cv.wait(lock);
-
 		T val = q.front();
 		q.pop_front();
+		return val;
+	}
 
+	std::optional<T> pop(const int timeout)
+	{
+		auto until = std::chrono::system_clock::now() + std::chrono::milliseconds(timeout);
+
+		std::unique_lock<std::mutex> lock(m);
+		while(q.empty()) {
+			if (cv.wait_until(lock, until) == std::cv_status::timeout)
+				return { };
+		}
+		T val = q.front();
+		q.pop_front();
 		return val;
 	}
 

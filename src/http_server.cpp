@@ -110,22 +110,27 @@ int recv_func(http_session_t *const session, uint8_t *const to, const size_t n)
 
 	uint8_t *p    = to;
 	size_t   todo = n;
-	do {
-		auto   values = session->incoming.pop();
-		size_t v_n    = values.size();
-		memcpy(p, values.data(), std::min(todo, v_n));
+	size_t   done = 0;
+	while(todo > 0 && session->stop_flag == false && stop_flag == false) {
+		auto   values = session->incoming.pop(SLEEP_INTERVAL_MS);
+		if (values.has_value() == false)
+			continue;
+		size_t v_n    = values.value().size();
+		memcpy(p, values.value().data(), std::min(todo, v_n));
 
 		if (v_n > todo) {
-			session->incoming.unpop(std::vector<uint8_t>(values.data() + todo, values.data() + v_n));
+			session->incoming.unpop(std::vector<uint8_t>(values.value().data() + todo, values.value().data() + v_n));
+			done += todo;
 			todo = 0;
 		}
 		else {
 			todo -= v_n;
 			p    += v_n;
+			done += v_n;
 		}
-	} while(todo > 0);
+	}
 
-	return n;
+	return done;
 }
 
 bool send_http_header(http_session_t *const session, const int which, const size_t payload_size, const std::string & message, const std::string & mime_type)
@@ -331,7 +336,7 @@ void process_http_request(http_session_t *const session)
 	auto length { st.st_size };
 	if (send_http_header(session, 200, length, "Ok!", mime_type)) {
 		uint8_t buffer[4096];
-		while(length > 0) {
+		while(length > 0 && session->stop_flag == false) {
 			auto chunk_size = std::min(length, long(sizeof buffer));
 			DOLOG(logger::ll_debug, "Sending %lu bytes, %lu left", chunk_size, length);
 
@@ -458,10 +463,9 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 							addr_ip4(from, from_len), from_port,
 							addr_ip4(to, to_len), to_port, ctx);
 					std::thread *th = new std::thread([hs] { process_http_request(hs); });
-					auto rc = sessions->insert({ session_id, { th, hs } }).second;
-					assert(rc);
+					auto rc = sessions->insert({ session_id, { th, hs } });
+					assert(rc.second);
 				}
-				// TODO MI_TCP_CLOSE
 				else {
 					DOLOG(logger::ll_debug, "Session %" PRIx64 " not known");
 					free(m);
@@ -470,6 +474,11 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
 			}
 			else {
 				hs = it->second.second;
+
+				if (flags & MI_TCP_CLOSE) {
+					DOLOG(logger::ll_debug, "Session %" PRIx64 ": close");
+					hs->stop_flag = true;
+				}
 			}
 		}
 

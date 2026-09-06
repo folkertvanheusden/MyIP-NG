@@ -656,6 +656,18 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			}
 
 			if (session) {
+				// send 'close' to shm server
+				uint32_t flags_temp = MI_TCP_CLOSE;
+				shm_message_queue::message *m_session = wrap_message_up_tcp(
+						session_id,
+						from_len, from, source_port,
+						to_len,   to,   destination_port,
+						flags_temp,
+						0, nullptr);
+				if (shm->send_message(session->shm_peer, m_session, false) == false)
+					DOLOG(logger::ll_debug, "INF) failed to transmit CLOSE message to %s for %" PRIx64, session->shm_peer, session_id);
+				free(m_session);
+
 				lck.unlock();  // FIXME
 				{
 					std::unique_lock<std::shared_mutex> lck(sessions_lock);
