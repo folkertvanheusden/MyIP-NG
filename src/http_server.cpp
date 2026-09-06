@@ -16,7 +16,6 @@
 #include <wolfssl/ssl.h>
 
 #include "common.h"
-#include "tcp.h"
 #include "utils/addresses.h"
 #include "utils/gen.h"
 #include "utils/log.h"

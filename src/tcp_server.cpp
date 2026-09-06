@@ -15,7 +15,6 @@ extern "C" {
 #include "3dparty/SipHash/siphash.h"
 }
 #include "common.h"
-#include "tcp.h"
 #include "utils/addresses.h"
 #include "utils/checksum.h"
 #include "utils/gen.h"
@@ -25,6 +24,7 @@ extern "C" {
 #include "utils/shm.h"
 #include "utils/shm_message.h"
 #include "utils/stoi.h"
+#include "utils/tcp-helpers.h"
 #include "utils/time.h"
 
 

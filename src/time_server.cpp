@@ -13,7 +13,6 @@
 #include <sys/stat.h>
 
 #include "common.h"
-#include "tcp.h"
 #include "utils/addresses.h"
 #include "utils/gen.h"
 #include "utils/log.h"
@@ -21,6 +20,7 @@
 #include "utils/shm.h"
 #include "utils/shm_message.h"
 #include "utils/stoi.h"
+#include "utils/tcp-helpers.h"
 
 
 std::atomic_bool stop_flag { false };
