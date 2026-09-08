@@ -426,6 +426,11 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					session->peer_seq++;
 					session->half_closed = true;
 				}
+
+				if (session->fin_sent) {
+					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " both sides sent FIN", session_id);
+					clean_session = true;
+				}
 			}
 		}
 
