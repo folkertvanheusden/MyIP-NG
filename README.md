@@ -35,6 +35,8 @@ sudo ip route add 192.168.1.0/24 dev test
 
 When restarting the tap server, also restart the arp server as the tap server may have gotten a new mac address.
 
+When run from systemd, set RemoveIPC=yes in /etc/systemd/logind.conf or else shared memory segments get removed when a server-program restarts leaving other server-processes to look at the wrong (old, no longer existing) segment.
+
 
 ## written by
 
