@@ -482,6 +482,8 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				}
 				else {
 					DOLOG(logger::ll_debug, "ERR) Received SYN for session %" PRIx64 " in ESTABLISHED state", session_id);
+					free(m);
+					continue;  // or GOTO?
 				}
 			}
 			else {  // new session
