@@ -500,15 +500,21 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				uint32_t ack_n  = ack_seq_nr - session->local_seq;
 				DOLOG(logger::ll_debug, "DBG) Session %" PRIx64 " ACK ack_seq_nr: %u, local: %u, n: %u, in flight: %u",
 						session_id, ack_seq_nr, session->local_seq, ack_n, session->in_flight);
-				if (ack_seq_nr >= session->local_seq && ack_n <= session->in_flight) {
-					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ACK %u bytes", session_id, ack_n);
-					session->l7_to_tcp.forget(ack_n);
-					DOLOG(logger::ll_debug, "DBG) Session %" PRIx64 " %zu bytes left", session_id, session->l7_to_tcp.len);
-					session->local_seq += ack_n;
-					session->in_flight -= ack_n;
+				if (ack_seq_nr >= session->local_seq) {
+					if (ack_n == session->in_flight) {
+						DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ACK %u bytes", session_id, ack_n);
+						session->l7_to_tcp.forget(ack_n);
+						DOLOG(logger::ll_debug, "DBG) Session %" PRIx64 " %zu bytes left", session_id, session->l7_to_tcp.len);
+						session->local_seq += ack_n;
+						session->in_flight -= ack_n;
+					}
+					else {
+						DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ACK %u bytes, trigger resend", session_id, ack_n);
+						resend = true;
+					}
 				}
 				else {
-					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ACK out of range", session_id);
+					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ACK out of range, trigger resend", session_id);
 					resend = true;
 				}
 
