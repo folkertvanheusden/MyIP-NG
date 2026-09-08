@@ -216,13 +216,14 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 			shm_message_queue::message *wrapped = nullptr;
 
 			size_t   pl_without_header_len = ip_size - header_size;
-
 			uint16_t id     = (pl[4] << 8) | pl[5];
-
 			uint16_t offset = (((pl[6] & 31) << 8) | pl[7]) * 8;
+
+			uint64_t msg_id = calc_session_id(ip4_src, ip4_dst, protocol, id);
+
 			// fragment?
 			if (offset > 0 || (flags & 1)) {
-				uint64_t frag_session = calc_session_id(ip4_src, ip4_dst, protocol, id);
+				uint64_t frag_session = msg_id;
 				DOLOG(logger::ll_debug, "Fragmented packet, id: %x", frag_session);
 
 				// store in fragment-store
@@ -274,6 +275,8 @@ void run_in(shm_message_queue *const shm, const std::pair<addr_ip4, int> & liste
 
 			if (wrapped) {
 				DOLOG(logger::ll_trace, "ETH->IP: %s", dump(&pl[header_size], pl_without_header_len).c_str());
+
+				wrapped->id = msg_id;
 
 				if (shm->send_message(it->second, wrapped, false) == false)
 					DOLOG(logger::ll_warning, "Cannot send to %s", it->second.c_str());

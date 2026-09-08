@@ -359,6 +359,8 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		int      mss_index        = 1;  // default, 0 breaks curl
 
 		if ((flags & FLAG_SYN) == FLAG_SYN && (flags & FLAG_ACK) == 0) {
+			DOLOG(logger::ll_debug, "IP session ID: %" PRIx64 ", TCP session ID: %" PRIx64, m->id, session_id);
+
 			const uint8_t *cur_extra_headers_p     = &pl[20];
 			const uint8_t *const extra_headers_end = &pl[header_size];
 
@@ -471,12 +473,15 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						}
 					}
 				}
-				else {
-					DOLOG(logger::ll_debug, "ERR) Received SYN for session %" PRIx64 " in ESTABLISHED state", session_id);
+				else if (session->state != established) {
+					DOLOG(logger::ll_debug, "ERR) Received duplicate SYN for session %" PRIx64, session_id);
 					send_syn_cookie(shm, out_name,
 							session_id, syn_cookie_salt, mss_index,
 							a_from, source_port, a_to, destination_port,
 							peer_seq_nr);
+				}
+				else {
+					DOLOG(logger::ll_debug, "ERR) Received SYN for session %" PRIx64 " in ESTABLISHED state", session_id);
 				}
 			}
 			else {  // new session
@@ -513,9 +518,13 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						session->local_seq += ack_n;
 						session->in_flight -= ack_n;
 					}
-					else {
+					else if (ack_n < session->in_flight) {
 						DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ACK %u bytes, trigger resend", session_id, ack_n);
 						resend = true;
+					}
+					else {
+						DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ACK %u bytes, suspicious as window size is %u byts",
+								session_id, ack_n, session->local_window_size);
 					}
 				}
 				else {
