@@ -432,6 +432,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				if (session->fin_sent) {
 					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " both sides sent FIN", session_id);
 					clean_session = true;
+					goto clean;
 				}
 			}
 		}
@@ -471,7 +472,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 							clean_session = true;
 							DOLOG(logger::ll_debug, "ERR) Could not send ACK for client session %" PRIx64, session_id);
 							free(m);
-							continue;  // or GOTO?
+							continue;
 						}
 					}
 				}
@@ -482,12 +483,12 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 							a_from, source_port, a_to, destination_port,
 							peer_seq_nr);
 					free(m);
-					continue;  // or GOTO?
+					continue;
 				}
 				else {
 					DOLOG(logger::ll_debug, "ERR) Received SYN for session %" PRIx64 " in ESTABLISHED state", session_id);
 					free(m);
-					continue;  // or GOTO?
+					continue;
 				}
 			}
 			else {  // new session
@@ -602,6 +603,9 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 								destination_port, source_port,  // swapped: reply
 								syn_cookie, peer_seq_nr,
 								FLAG_RST, window_size, { nullptr, 0 }, MI_IP4_MIN_TCP_MTU);
+
+						free(m);
+						continue;
 					}
 				}
 			}
@@ -609,7 +613,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		else {
 			DOLOG(logger::ll_debug, "ERR) Session %" PRIx64 " has an unexpected state - pl size: %d, flags: %s", session_id, tcp_pl_size, flags_to_str(flags).c_str());
 			free(m);
-			continue;  // or GOTO?
+			continue;
 		}
 
 		// send data to local shm peer
@@ -673,6 +677,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			DOLOG(logger::ll_debug, "WRN) Packet for a not known session with id %" PRIx64, session_id);
 		}
 
+clean:
 		if (invalid || clean_session) {
 			if (invalid && invalid_w_rst) {
 				DOLOG(logger::ll_debug, "INF) send RST for [%s]:%d to [%s]:%d", a_to.to_str('.', false).c_str(), destination_port, a_from.to_str('.', false).c_str(), source_port);
