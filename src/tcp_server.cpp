@@ -470,6 +470,8 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						{
 							clean_session = true;
 							DOLOG(logger::ll_debug, "ERR) Could not send ACK for client session %" PRIx64, session_id);
+							free(m);
+							continue;  // or GOTO?
 						}
 					}
 				}
@@ -479,6 +481,8 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 							session_id, syn_cookie_salt, mss_index,
 							a_from, source_port, a_to, destination_port,
 							peer_seq_nr);
+					free(m);
+					continue;  // or GOTO?
 				}
 				else {
 					DOLOG(logger::ll_debug, "ERR) Received SYN for session %" PRIx64 " in ESTABLISHED state", session_id);
@@ -604,10 +608,12 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		}
 		else {
 			DOLOG(logger::ll_debug, "ERR) Session %" PRIx64 " has an unexpected state - pl size: %d, flags: %s", session_id, tcp_pl_size, flags_to_str(flags).c_str());
+			free(m);
+			continue;  // or GOTO?
 		}
 
 		// send data to local shm peer
-		if (session != nullptr) {
+		if (session != nullptr && invalid == false) {
 			if (peer_seq_nr == session->peer_seq) {
 				bool ok = true;
 				if (tcp_pl_size > 0) {
