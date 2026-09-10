@@ -129,6 +129,12 @@ void process_http_request(http_session_t *const session)
 
 	std::string recv_buffer;
 	do {
+		if (recv_buffer.size() > 32768) {
+			DOLOG(logger::ll_debug, "DDOS error?");
+			end_session(session);
+			return;
+		}
+
 		if (session->ssl) {
 			char c = 0;
 			if (wolfSSL_read(session->ssl, &c, 1) != 1) {
