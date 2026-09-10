@@ -116,6 +116,7 @@ struct session_t {
 };
 
 std::atomic_bool stop_flag { false };
+std::atomic_bool dump_flag { false };
 
 std::string seq_delta_lcl(const session_t *const s, const std::optional<uint32_t> & current = { })
 {
@@ -141,7 +142,10 @@ std::string seq_delta_peer(const session_t *const s, const std::optional<uint32_
 
 void sig_handler(int sig)
 {
-	stop_flag = true;
+	if (sig == SIGINT)
+		stop_flag = true;
+	else if (sig == SIGHUP)
+		dump_flag = true;
 }
 
 std::string flags_to_str(const int flags)
@@ -819,6 +823,21 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 	sender.join();
 }
 
+void dump_sessions(std::map<uint64_t, session_t *> *const sessions, std::shared_mutex & sessions_lock)
+{
+	std::unique_lock<std::shared_mutex> lck(sessions_lock);
+	for(auto & session: *sessions) {
+		DOLOG(logger::ll_debug, "Session %" PRIx64, session.first);
+		DOLOG(logger::ll_debug, "[%s]:%d%s -> [%s]:%d%s",
+				session.second->local_addr.to_str('.', false).c_str(), session.second->local_port,
+				session.second->l7_send_fin ? " (FIN)":"",
+				session.second->peer_addr.to_str ('.', false).c_str(), session.second->peer_port,
+				session.second->half_closed ? " (FIN)":"");
+		DOLOG(logger::ll_debug, "queued tcp->l7: %zu, l7->tcp: %u, in flight: %zu",
+				session.second->tcp_to_l7.len, session.second->l7_to_tcp.len, session.second->in_flight);
+	}
+}
+
 void run_meta(shm_message_queue *const shm, const std::string & out_name,
 	      const addr & from_addr,
 	      shm_message_queue *const shm_meta,
@@ -831,6 +850,11 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 	std::map<uint16_t, uint64_t> local_allocated_ports;
 
 	while(!stop_flag) {
+		if (dump_flag.exchange(false)) {
+			dump_sessions(sessions, sessions_lock);
+			continue;
+		}
+
 		shm_message_queue::message *m = shm_meta->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_new, { });
 		if (!m)
 			continue;
@@ -1143,6 +1167,7 @@ int main(int argc, char *argv[])
 	iniparser_freedict(d);
 
 	signal(SIGINT, sig_handler);
+	signal(SIGHUP, sig_handler);
 
 	shm_message_queue *shm = create_shm(name, msg_queue_size);
 	if (shm == nullptr)
