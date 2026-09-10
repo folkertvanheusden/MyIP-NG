@@ -780,7 +780,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 		if (!m)
 			continue;
 
-		if (m->size <= 8) {
+		if (m->size <= 12) {
 			DOLOG(logger::ll_error, "ERR) TCP payload message too short");
 			free(m);
 			continue;
