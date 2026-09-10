@@ -109,6 +109,14 @@ int my_wolfssl_send(WOLFSSL *ssl, char *buf, int sz, void *ctx)
 	return sz;
 }
 
+void end_session(http_session_t *const session)
+{
+	if (session->ssl)
+		wolfSSL_free(session->ssl);
+	fin_func(session);
+	session->finished = true;
+}
+
 void process_http_request(http_session_t *const session)
 {
 	DOLOG(logger::ll_debug, "HTTP request handler running for session %" PRIx64, session->session_id);
@@ -125,9 +133,7 @@ void process_http_request(http_session_t *const session)
 			char c = 0;
 			if (wolfSSL_read(session->ssl, &c, 1) != 1) {
 				DOLOG(logger::ll_debug, "Read error");
-				wolfSSL_free(session->ssl);
-				fin_func(session);
-				session->finished = true;
+				end_session(session);
 				return;
 			}
 			recv_buffer += c;
@@ -150,10 +156,7 @@ void process_http_request(http_session_t *const session)
 			if (parts.size() != 3) {
 				send_http_header(session,
 						405, 0, "Can't make cheese from your supposedly HTTP request", "text/html");
-				if (session->ssl)
-					wolfSSL_free(session->ssl);
-				fin_func(session);
-				session->finished = true;
+				end_session(session);
 				return;
 			}
 
@@ -161,10 +164,7 @@ void process_http_request(http_session_t *const session)
 				url = line.substr(4);
 				auto space = url.find(" ");
 				if (space == std::string::npos) {  // invalid
-					if (session->ssl)
-						wolfSSL_free(session->ssl);
-					fin_func(session);
-					session->finished = true;
+					end_session(session);
 					return;
 				}
 				url = url.substr(0, space);
@@ -172,10 +172,7 @@ void process_http_request(http_session_t *const session)
 			else {
 				send_http_header(session,
 						501, 0, "Only GET please", "text/html");
-				if (session->ssl)
-					wolfSSL_free(session->ssl);
-				fin_func(session);
-				session->finished = true;
+				end_session(session);
 				return;
 			}
 		}
@@ -184,10 +181,7 @@ void process_http_request(http_session_t *const session)
 	if (url.empty()) {
 		send_http_header(session,
 				405, 0, "URL missing", "text/html");
-		if (session->ssl)
-			wolfSSL_free(session->ssl);
-		fin_func(session);
-		session->finished = true;
+		end_session(session);
 		return;
 	}
 
@@ -197,10 +191,7 @@ void process_http_request(http_session_t *const session)
 	if (url.find("..") != std::string::npos || url.find("~") != std::string::npos) {
 		send_http_header(session,
 				500, 0, "Invalid URL", "text/html");
-		if (session->ssl)
-			wolfSSL_free(session->ssl);
-		fin_func(session);
-		session->finished = true;
+		end_session(session);
 		return;
 	}
 
@@ -216,10 +207,7 @@ void process_http_request(http_session_t *const session)
 		send_http_header(session,
 				404, 0, "Not found", "text/html");
 		access_log(session, url, 404);
-		if (session->ssl)
-			wolfSSL_free(session->ssl);
-		fin_func(session);
-		session->finished = true;
+		end_session(session);
 		return;
 	}
 
@@ -230,10 +218,7 @@ void process_http_request(http_session_t *const session)
 		send_http_header(session,
 				500, 0, "Unknown error", "text/html");
 		access_log(session, url, 500);
-		if (session->ssl)
-			wolfSSL_free(session->ssl);
-		fin_func(session);
-		session->finished = true;
+		end_session(session);
 		return;
 	}
 
@@ -290,12 +275,7 @@ void process_http_request(http_session_t *const session)
 
 	close(fd);
 
-	if (session->ssl)
-		wolfSSL_free(session->ssl);
-
-	fin_func(session);  // send FIN
-
-	session->finished = true;
+	end_session(session);
 }
 
 void run_in(shm_message_queue *const shm, const std::string & out_name,
