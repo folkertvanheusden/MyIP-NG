@@ -475,7 +475,6 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 						{
 							clean_session = true;
 							DOLOG(logger::ll_debug, "ERR) Could not send ACK for client session %" PRIx64, session_id);
-							free(m);
 							goto clean;
 						}
 					}
@@ -608,8 +607,8 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 								syn_cookie, peer_seq_nr,
 								FLAG_RST, window_size, { nullptr, 0 }, MI_IP4_MIN_TCP_MTU);
 
-						free(m);
-						continue;
+						clean_session = true;
+						goto clean;
 					}
 				}
 			}
