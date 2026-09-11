@@ -413,6 +413,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			session = it->second;
 
 		if (session) {
+			session->updated_ts       = get_us();
 			session->peer_window_size = window_size;
 
 			DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", local seq nr: %s, ack seq nr: %s",
@@ -425,24 +426,6 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		bool invalid_w_rst   = true;
 		bool invalid_inc_ack = false;  // set when a processing a SYN
 		bool clean_session   = false;
-
-		if (session) {
-			if (flags & FLAG_FIN) {
-				DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " FIN flag", session_id);
-				if (session->half_closed == false) {
-					session->peer_seq++;
-					session->half_closed = true;
-				}
-
-				if (session->fin_sent) {
-					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " both sides sent FIN", session_id);
-					clean_session = true;
-					goto clean;
-				}
-			}
-
-			session->updated_ts = get_us();
-		}
 
 		if (flags & FLAG_RST) {
 			clean_session = true;
@@ -682,6 +665,21 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		}
 		else {
 			DOLOG(logger::ll_debug, "WRN) Packet for a not known session with id %" PRIx64, session_id);
+		}
+
+		if (session) {
+			if (flags & FLAG_FIN) {
+				DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " FIN flag", session_id);
+				if (session->half_closed == false) {
+					session->peer_seq++;
+					session->half_closed = true;
+				}
+
+				if (session->fin_sent) {
+					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " both sides sent FIN", session_id);
+					clean_session = true;
+				}
+			}
 		}
 
 clean:
@@ -1012,7 +1010,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 					send_tcp_packet(shm, out_name,
 							fin_session->local_addr, fin_session->peer_addr,
 							fin_session->local_port, fin_session->peer_port,
-							fin_session->local_seq + 1,  fin_session->peer_seq,
+							fin_session->local_seq,  fin_session->peer_seq,
 							FLAG_FIN, fin_session->local_window_size, { nullptr, 0 },
 							MI_IP4_MIN_TCP_MTU);
 
