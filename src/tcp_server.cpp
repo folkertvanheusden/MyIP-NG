@@ -433,6 +433,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		bool invalid_w_rst   = true;
 		bool invalid_inc_ack = false;  // set when a processing a SYN
 		bool clean_session   = false;
+		bool acked_packet    = false;
 
 		if (flags & FLAG_RST) {
 			clean_session = true;
@@ -641,6 +642,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 								session->local_seq, session->peer_seq + tcp_pl_size,
 								FLAG_ACK, session->local_window_size, { nullptr, 0 }, session->mss) == 0) {
 							session->peer_seq += tcp_pl_size;
+							acked_packet = true;
 						}
 						else
 						{
@@ -681,6 +683,14 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				if (session->half_closed == false) {
 					session->peer_seq++;
 					session->half_closed = true;
+				}
+
+				if (acked_packet == false && send_tcp_packet(shm, out_name,
+							a_to, a_from,  // swapped: reply
+							destination_port, source_port,  // swapped: reply
+							session->local_seq, session->peer_seq + tcp_pl_size,
+							FLAG_ACK, session->local_window_size, { nullptr, 0 }, session->mss) == -1) {
+					DOLOG(logger::ll_debug, "ERR) Cannot ack FIN for %" PRIx64, session_id);
 				}
 
 				if (session->fin_sent) {
