@@ -10,8 +10,8 @@
 #include <mutex>
 #include <thread>
 #include <turbojpeg.h>
+#include <unistd.h>
 #include <arpa/inet.h>
-#include <iniparser/iniparser.h>
 #include <sys/stat.h>
 #include <zlib.h>
 

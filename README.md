@@ -1,11 +1,26 @@
 ## requirements
 
+### FreeBSD
+
+* iniparser
+* cmake
+* pkgconf
+* clang (19 or more recent)
+* libjpeg-turbo
+* graphviz
+* wolfssl
+
+
+### Linux
+
 * libiniparser-dev
 * cmake
+* pkg-config
 * c++ compiler (23)
 * graphviz
 * libwolfssl-dev
 * libturbojpeg-dev
+
 
 ## compile
 

@@ -8,7 +8,7 @@
 #include <map>
 #include <shared_mutex>
 #include <thread>
-#include <iniparser/iniparser.h>
+#include <unistd.h>
 #include <sys/random.h>
 
 extern "C" {

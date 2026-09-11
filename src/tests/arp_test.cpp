@@ -1,4 +1,5 @@
 #include <atomic>
+#include <format>
 #include <cassert>
 #include <thread>
 #include <unistd.h>

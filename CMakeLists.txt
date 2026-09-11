@@ -67,16 +67,6 @@ add_executable(checksum_test
 	src/tests/checksum_tcp_udp_test.cpp
 	)
 
-add_executable(tap_server
-	src/common.cpp
-	src/tap_server.cpp
-	)
-
-add_executable(promiscuous_server
-	src/common.cpp
-	src/promisc_server.cpp
-	)
-
 add_executable(arp_server
 	src/arp_server.cpp
 	src/common.cpp
@@ -133,6 +123,20 @@ add_executable(vnc_server
 	src/utils/tcp-helpers.cpp
 	)
 
+add_executable(tap_server
+	src/common.cpp
+	src/tap_server.cpp
+	)
+
+if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
+MESSAGE("promiscuous_server is not ported to FreeBSD yet")
+else()
+add_executable(promiscuous_server
+	src/common.cpp
+	src/promisc_server.cpp
+	)
+endif()
+
 add_custom_command(OUTPUT ${CMAKE_SOURCE_DIR}/www/setup.svg
     COMMAND dot -Tsvg ${CMAKE_SOURCE_DIR}/docs/setup.gv -o ${CMAKE_SOURCE_DIR}/www/setup.svg
     DEPENDS ${CMAKE_SOURCE_DIR}/docs/setup.gv
@@ -149,7 +153,9 @@ target_link_libraries(http_server shm log misc)
 target_link_libraries(icmp_server shm log misc)
 target_link_libraries(ip4_server shm log misc)
 target_link_libraries(ntp_server shm log misc)
+if (NOT ${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
 target_link_libraries(promiscuous_server shm log misc)
+endif()
 target_link_libraries(shm_measure shm log)
 target_link_libraries(shm_message_test shm log)
 target_link_libraries(shm_test shm log)
@@ -163,44 +169,59 @@ target_link_libraries(vnc_server shm log misc)
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 find_package(Threads)
+target_link_libraries(log Threads::Threads)
 target_link_libraries(shm_test Threads::Threads)
 
 include(FindPkgConfig)
 
 pkg_check_modules(INI REQUIRED iniparser)
+target_link_directories(arp_server PRIVATE ${INI_LIBRARY_DIRS})
 target_link_libraries(arp_server ${INI_LIBRARIES})
 target_include_directories(arp_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(arp_server PUBLIC ${INI_CFLAGS_OTHER})
+target_link_directories(gopher_server PRIVATE ${INI_LIBRARY_DIRS})
 target_link_libraries(gopher_server ${INI_LIBRARIES})
 target_include_directories(gopher_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(gopher_server PUBLIC ${INI_CFLAGS_OTHER})
+target_link_directories(http_server PRIVATE ${INI_LIBRARY_DIRS})
 target_link_libraries(http_server ${INI_LIBRARIES})
 target_include_directories(http_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(http_server PUBLIC ${INI_CFLAGS_OTHER})
+target_link_directories(icmp_server PRIVATE ${INI_LIBRARY_DIRS})
 target_link_libraries(icmp_server ${INI_LIBRARIES})
 target_include_directories(icmp_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(icmp_server PUBLIC ${INI_CFLAGS_OTHER})
+target_link_directories(ip4_server PRIVATE ${INI_LIBRARY_DIRS})
 target_link_libraries(ip4_server ${INI_LIBRARIES})
 target_include_directories(ip4_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(ip4_server PUBLIC ${INI_CFLAGS_OTHER})
+target_link_directories(ntp_server PRIVATE ${INI_LIBRARY_DIRS})
 target_link_libraries(ntp_server ${INI_LIBRARIES})
 target_include_directories(ntp_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(ntp_server PUBLIC ${INI_CFLAGS_OTHER})
+if (NOT ${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
+target_link_directories(promiscuous_server PRIVATE ${INI_LIBRARY_DIRS})
 target_link_libraries(promiscuous_server ${INI_LIBRARIES})
 target_include_directories(promiscuous_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(promiscuous_server PUBLIC ${INI_CFLAGS_OTHER})
+endif()
+target_link_directories(tap_server PRIVATE ${INI_LIBRARY_DIRS})
 target_link_libraries(tap_server ${INI_LIBRARIES})
 target_include_directories(tap_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(tap_server PUBLIC ${INI_CFLAGS_OTHER})
+target_link_directories(tcp_server PRIVATE ${INI_LIBRARY_DIRS})
 target_link_libraries(tcp_server ${INI_LIBRARIES})
 target_include_directories(tcp_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(tcp_server PUBLIC ${INI_CFLAGS_OTHER})
 target_link_libraries(time_server ${INI_LIBRARIES})
+target_link_directories(time_server PRIVATE ${INI_LIBRARY_DIRS})
 target_include_directories(time_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(time_server PUBLIC ${INI_CFLAGS_OTHER})
+target_link_directories(udp_server PRIVATE ${INI_LIBRARY_DIRS})
 target_link_libraries(udp_server ${INI_LIBRARIES})
 target_include_directories(udp_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(udp_server PUBLIC ${INI_CFLAGS_OTHER})
+target_link_directories(vnc_server PRIVATE ${INI_LIBRARY_DIRS})
 target_link_libraries(vnc_server ${INI_LIBRARIES})
 target_include_directories(vnc_server PUBLIC ${INI_INCLUDE_DIRS})
 target_compile_options(vnc_server PUBLIC ${INI_CFLAGS_OTHER})

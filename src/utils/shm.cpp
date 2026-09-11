@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cstdlib>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/mman.h>
@@ -32,7 +33,11 @@ bool shm_message_queue::begin()
 	if (get_segment != -1)
 		return false;
 
+#if defined(linux)
 	get_segment = shm_open(local_identifier.c_str(), O_RDWR | O_CREAT, 0600);
+#else
+	get_segment = shm_open(("/" + local_identifier).c_str(), O_RDWR | O_CREAT, 0600);
+#endif
 	if (get_segment == -1) {
 		DOLOG(logger::ll_error, "shm_open(%s) failed: %s", local_identifier.c_str(), strerror(errno));
 		return false;

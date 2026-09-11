@@ -8,8 +8,8 @@
 #include <mutex>
 #include <set>
 #include <thread>
+#include <unistd.h>
 #include <vector>
-#include <iniparser/iniparser.h>
 #include <sys/random.h>
 
 extern "C" {

@@ -1,6 +1,11 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#if defined(__FreeBSD__)
+#include <iniparser.h>
+#else
+#include <iniparser/iniparser.h>
+#endif
 
 #include "utils/shm.h"
 

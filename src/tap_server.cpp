@@ -11,8 +11,13 @@
 #include <thread>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <iniparser/iniparser.h>
+#if defined(linux)
 #include <linux/if_tun.h>
+#elif defined(__FreeBSD__)
+#include <ifaddrs.h>
+#include <net/if_dl.h>
+#include <net/if_tap.h>
+#endif
 #include <net/if.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -41,6 +46,7 @@ static void set_ifr_name(ifreq *const ifr, const std::string & device_name)
 	ifr->ifr_name[copy_name_n] = 0x00;
 }
 
+#if defined(linux)
 int open_tap(const std::string & device_name, const int mtu_size)
 {
 	int fd = open("/dev/net/tun", O_RDWR);
@@ -109,6 +115,7 @@ bool get_local_mac(const std::string & device_name, uint8_t mac_addr[6])
 	ifr_tap.ifr_addr.sa_family = AF_INET;
 	if (ioctl(fd_sock, SIOCGIFHWADDR, &ifr_tap) == -1) {
 		DOLOG(logger::ll_error, "ioctl SIOCGIFHWADDR: %s", strerror(errno));
+		close(fd_sock);
                 return false;
         }
 
@@ -117,6 +124,76 @@ bool get_local_mac(const std::string & device_name, uint8_t mac_addr[6])
 
 	return true;
 }
+#elif defined(__FreeBSD__)
+int open_tap(std::string *const device_name, const int mtu_size)
+{
+	int fd = open("/dev/tap", O_RDWR);
+	if (fd == -1) {
+		DOLOG(logger::ll_error, "open /dev/tap failed: %s", strerror(errno));
+		return -1;
+	}
+
+	if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1) {
+		DOLOG(logger::ll_error, "fcntl(FD_CLOEXEC) failed: %s", strerror(errno));
+		close(fd);
+		return -1;
+	}
+
+	ifreq ifr_tap { };
+	if (ioctl(fd, TAPGIFNAME, &ifr_tap) == -1) {
+		DOLOG(logger::ll_error, "ioctl(TAPGIFNAME) failed: %s", strerror(errno));
+		close(fd);
+		return -1;
+	}
+	device_name->assign(ifr_tap.ifr_name);
+
+	return fd;
+}
+
+bool set_mtu_size(const int fd, const int mtu_size)
+{
+	tapinfo info { };
+
+	if (ioctl(fd, TAPGIFINFO, &info) == -1) {
+		DOLOG(logger::ll_error, "Failed to get tap interface info");
+		return false;
+	}
+
+	info.mtu = mtu_size;
+
+	if (ioctl(fd, TAPSIFINFO, &info) == -1) {
+		DOLOG(logger::ll_error, "Failed to set tap interface info");
+		return false;
+	}
+
+	return true;
+}
+
+bool get_local_mac(const std::string & device_name, uint8_t mac_addr[6])
+{
+	ifaddrs *ifap { };
+	ifaddrs *ifa { };
+
+	if (getifaddrs(&ifap) != 0) {
+		DOLOG(logger::ll_error, "getifaddrs failed");
+		return false;
+	}
+
+	for (ifa = ifap; ifa != nullptr; ifa = ifa->ifa_next) {
+		if (ifa->ifa_addr->sa_family == AF_LINK &&
+				strcmp(ifa->ifa_name, device_name.c_str()) == 0) {
+
+			sockaddr_dl *sdl = reinterpret_cast<sockaddr_dl *>(ifa->ifa_addr);
+			memcpy(mac_addr, reinterpret_cast<const uint8_t *>(LLADDR(sdl)), 6);
+			freeifaddrs(ifap);
+			return true;
+		}
+	}
+
+	freeifaddrs(ifap);
+	return false;
+}
+#endif
 
 void push_meta_reply(shm_message_queue *const shm_meta, const std::string & to, const std::string & reply, const uint64_t msg_nr)
 {
@@ -329,11 +406,15 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "\"name\" under \"global\" missing\n");
 		return 1;
 	}
+#if defined(linux)
 	std::string device_name = iniparser_getstring(d, "specific:dev", "");
 	if (device_name.empty()) {
 		fprintf(stderr, "\"dev\" under \"specific\" missing\n");
 		return 1;
 	}
+#else
+	std::string device_name;
+#endif
 	std::string meta_name = iniparser_getstring(d, "global:meta-name", "");
 	if (meta_name.empty()) {
 		fprintf(stderr, "\"meta-name\" under \"global\" missing\n");
@@ -366,14 +447,22 @@ int main(int argc, char *argv[])
 
 	signal(SIGINT, sig_handler);
 
-	int               tap_fd = open_tap(device_name, mtu_size);
+#if defined(linux)
+	int tap_fd = open_tap(device_name, mtu_size);
+#elif defined(__FreeBSD__)
+	int tap_fd = open_tap(&device_name, mtu_size);
+#endif
 	if (tap_fd == -1) {
 		fprintf(stderr, "Failed to initialize Ethernet device \"%s\"\n", device_name.c_str());
 		return 1;
 	}
 	uint8_t           mac_addr[6] { };
 	get_local_mac(device_name, mac_addr);
+#if defined(linux)
 	set_mtu_size (device_name, mtu_size);
+#elif defined(__FreeBSD__)
+	set_mtu_size (tap_fd, mtu_size);
+#endif
 
 	if (setgid(run_group_as) == -1) {
 		fprintf(stderr, "Cannot change group to %d: %s\n", run_group_as, strerror(errno));

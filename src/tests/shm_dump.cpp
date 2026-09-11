@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cerrno>
 #include <cinttypes>
 #include <cstring>
 #include <fcntl.h>
