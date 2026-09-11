@@ -231,6 +231,7 @@ uint32_t my_syn_cookie(const uint64_t session_id, const uint8_t syn_cookie_salt[
 	uint32_t sip_out[2] { };
 	siphash(buffer, sizeof buffer, syn_cookie_salt, reinterpret_cast<uint8_t *>(sip_out), sizeof sip_out);
 
+	assert(mss_index >= 0 && mss_index <= 7);
 	uint32_t s = sip_out[0] ^ sip_out[1];  // fold hash in half
 	return (s & 0xFFFFFF00) | (t << 3) | mss_index;
 }
@@ -363,6 +364,12 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		uint32_t ack_seq_nr       = get_uint32(&pl[ 8]);
 		int      tcp_pl_size      = pl_len - header_size;
 		int      mss_index        = 1;  // default, 0 breaks curl
+
+		if (header_size < 20) {
+			DOLOG(logger::ll_debug, "TCP header too short (%d bytes < 20)", header_size);
+			free(m);
+			continue;
+		}
 
 		if ((flags & FLAG_SYN) == FLAG_SYN && (flags & FLAG_ACK) == 0) {
 			DOLOG(logger::ll_debug, "IP session ID: %" PRIx64 ", TCP session ID: %" PRIx64, m->id, session_id);
@@ -537,9 +544,10 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			}
 			else {  // start of new session
 				// as this is a response to a SYN(+ACK), increase local sequence number
-				uint32_t syn_cookie = my_syn_cookie(session_id, syn_cookie_salt, 0);
-				if (syn_cookie != (ack_seq_nr & ~7)) {
-					DOLOG(logger::ll_debug, "ERR) Invalid SYN-cookie %08x - expecting %08x", ack_seq_nr & ~7, syn_cookie & ~7);
+				uint32_t seq_before_syn = ack_seq_nr - 1;
+				uint32_t syn_cookie = my_syn_cookie(session_id, syn_cookie_salt, seq_before_syn & 7);
+				if (syn_cookie != seq_before_syn) {
+					DOLOG(logger::ll_debug, "ERR) Invalid SYN-cookie %08x - expecting %08x", seq_before_syn, syn_cookie);
 					send_tcp_packet(shm, out_name,
 							a_to, a_from,  // swapped: reply
 							destination_port, source_port,  // swapped: reply
