@@ -89,6 +89,8 @@ void tcp_data_free_function(tcp_data & p)
 }
 
 struct session_t {
+	uint64_t    updated_ts;
+
 	bool        is_client;
 	char        shm_peer[max_id_length];  // only valid for is_client == true
 
@@ -424,7 +426,6 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		bool invalid_inc_ack = false;  // set when a processing a SYN
 		bool clean_session   = false;
 
-
 		if (session) {
 			if (flags & FLAG_FIN) {
 				DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " FIN flag", session_id);
@@ -439,6 +440,8 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					goto clean;
 				}
 			}
+
+			session->updated_ts = get_us();
 		}
 
 		if (flags & FLAG_RST) {
@@ -624,6 +627,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			if (peer_seq_nr == session->peer_seq) {
 				bool ok = true;
 				if (tcp_pl_size > 0) {
+					DOLOG(logger::ll_debug, "INF) send MI_TCP_FIN to L7 for %" PRIx64, session_id);
 					uint32_t flags_temp = session->half_closed ? MI_TCP_FIN : 0;
 					shm_message_queue::message *m_session = wrap_message_up_tcp(
 							session_id, 
@@ -827,6 +831,7 @@ void dump_sessions(std::map<uint64_t, session_t *> *const sessions, std::shared_
 	std::unique_lock<std::shared_mutex> lck(sessions_lock);
 	for(auto & session: *sessions) {
 		DOLOG(logger::ll_debug, "Session %" PRIx64, session.first);
+		DOLOG(logger::ll_debug, "Age: %.6f", (get_us() - session.second->updated_ts) / 1'000'000.);
 		DOLOG(logger::ll_debug, "[%s]:%d%s -> [%s]:%d%s",
 				session.second->local_addr.to_str('.', false).c_str(), session.second->local_port,
 				session.second->l7_send_fin ? " (FIN)":"",
