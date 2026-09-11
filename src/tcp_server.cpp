@@ -542,7 +542,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 				sessions_cv.notify_all();
 			}
-			else {  // start of new session
+			else if ((flags & FLAG_FIN) == 0) {  // start of new session
 				// as this is a response to a SYN(+ACK), increase local sequence number
 				uint32_t seq_before_syn = ack_seq_nr - 1;
 				uint32_t syn_cookie = my_syn_cookie(session_id, syn_cookie_salt, seq_before_syn & 7);
