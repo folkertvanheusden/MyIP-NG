@@ -162,7 +162,7 @@ class ct_tcp(unittest.TestCase):
         syn_ack = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=my_seq + 1, window=1)
         send(ip/syn_ack, verbose=0)
         pl = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=my_seq + 1, window=1)
-        teststring = 'User-Agent: not relevant for the test\r\n\r\n'
+        teststring = 'GET / HTTP/1.0\r\n\r\n'
         for i in range(5):
             send(ip/pl/Raw(load=teststring), verbose=0)
 
