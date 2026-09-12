@@ -25,6 +25,7 @@ class conn_state:
 @dataclass
 class direction_tracker:
     isn: int | None = None
+    isn_known: bool = False
     last_seq_unwrapped: int | None = None
     contig_end: int | None = None
     highest_ack_seen: int | None = None
@@ -41,6 +42,9 @@ class flow_tracker:
     initiator: tuple[str, int] | None = None
     responder: tuple[str, int] | None = None
     fin_from: tuple[str, int] | None = None
+    second_fin_from: tuple[str, int] | None = None
+    second_fin_ack_needed: int | None = None
+    handshake_observed: bool = False
 
     def __post_init__(self):
         self.dirs[self.endpoint_a] = direction_tracker()
@@ -133,8 +137,14 @@ def classify_state(flow: flow_tracker, src_ep: tuple[str, int], dst_ep: tuple[st
     if flow.state == conn_state.new:
         if has_syn and not has_ack:
             flow.state = conn_state.syn_seen
+            flow.handshake_observed = True
             flow.initiator = src_ep
             flow.responder = dst_ep
+        elif has_syn and has_ack:
+            flow.state = conn_state.syn_ack_seen
+            flow.handshake_observed = True
+            flow.responder = src_ep
+            flow.initiator = dst_ep
         else:
             flow.state = conn_state.midstream
             st.append('MIDSTREAM')
@@ -169,17 +179,16 @@ def classify_state(flow: flow_tracker, src_ep: tuple[str, int], dst_ep: tuple[st
     if flow.state == conn_state.fin_wait:
         if has_fin and src_ep != flow.fin_from:
             flow.state = conn_state.fin_both
+            flow.second_fin_from = src_ep
         return st
 
     if flow.state == conn_state.fin_both:
-        if has_ack and not has_fin:
-            flow.state = conn_state.closed
         return st
 
     return st
 
 
-def flow_key(src_ip: str, src_port: int, dst_ip: str, dst_port: int):
+def flow_key(src_ip: str, src_port: int, dst_ip: str, dst_port: int) -> tuple[tuple[str, int], tuple[str, int]]:
     ep1 = (src_ip, src_port)
     ep2 = (dst_ip, dst_port)
     return (ep1, ep2) if ep1 <= ep2 else (ep2, ep1)
@@ -218,6 +227,7 @@ for p in packets:
     has_fin = bool(int(tcp.flags) & 0x01)
     has_rst = bool(int(tcp.flags) & 0x04)
 
+    prev_state = flow.state
     statuses = classify_state(flow, src_ep, dst_ep, has_syn, has_ack, has_fin, has_rst)
 
     seg_len_seq_space = payload_len + (1 if has_syn else 0) + (1 if has_fin else 0)
@@ -228,9 +238,7 @@ for p in packets:
 
     if sender.isn is None:
         sender.isn = seq_u
-    if peer.isn is None and (has_syn and has_ack):
-        peer.isn = unwrap32(int(tcp.ack) - 1, peer.last_seq_unwrapped)
-
+        sender.isn_known = has_syn
     if seg_len_seq_space > 0:
         seg_end = seq_u + seg_len_seq_space
 
@@ -245,6 +253,12 @@ for p in packets:
         if sender.contig_end is None:
             sender.contig_end = seq_u
         update_contiguous(sender)
+
+        if has_fin and prev_state == conn_state.fin_wait and flow.state == conn_state.fin_both and src_ep == flow.second_fin_from:
+            if flow.second_fin_ack_needed is None:
+                flow.second_fin_ack_needed = seg_end
+            else:
+                flow.second_fin_ack_needed = min(flow.second_fin_ack_needed, seg_end)
     elif is_pure_ack(has_ack, payload_len, has_syn, has_fin, has_rst):
         statuses.append('PURE_ACK')
     elif not statuses:
@@ -252,9 +266,18 @@ for p in packets:
 
     ack_u = None
     if has_ack:
-        ack_u = unwrap32(int(tcp.ack), sender.highest_ack_seen)
+        ack_ref = sender.highest_ack_seen
+        if peer.contig_end is not None:
+            ack_ref = peer.contig_end
+        elif peer.last_seq_unwrapped is not None:
+            ack_ref = peer.last_seq_unwrapped
+        ack_u = unwrap32(int(tcp.ack), ack_ref)
 
-        if peer.isn is not None and ack_u < peer.isn:
+        if has_syn and has_ack and peer.isn is None:
+            peer.isn = ack_u - 1
+            peer.isn_known = True
+
+        if peer.isn_known and peer.isn is not None and ack_u < peer.isn:
             statuses.append('BAD_ACK')
         elif peer.contig_end is not None and ack_u > peer.contig_end:
             statuses.append('BAD_ACK')
@@ -269,11 +292,23 @@ for p in packets:
             else:
                 statuses.append('ACK_BACK')
 
+    if (
+        flow.state == conn_state.fin_both and
+        ack_u is not None and
+        flow.fin_from is not None and
+        flow.second_fin_from is not None and
+        flow.second_fin_ack_needed is not None and
+        src_ep == flow.fin_from and
+        dst_ep == flow.second_fin_from and
+        ack_u >= flow.second_fin_ack_needed
+    ):
+        flow.state = conn_state.closed
+
     nr += 1
     ts_str = time.strftime('%H:%M:%S', time.gmtime(float(p.time))) + f'.{int(p.time * 1000000) % 1000000:06}'
 
-    seq_rel_offset = sender.isn if sender.isn is not None else seq_u
-    ack_rel_offset = peer.isn if peer.isn is not None else (ack_u if ack_u is not None else 0)
+    seq_rel_offset = sender.isn if sender.isn_known and sender.isn is not None else 0
+    ack_rel_offset = peer.isn if peer.isn_known and peer.isn is not None else 0
 
     print(
         f"{nr:3} "
