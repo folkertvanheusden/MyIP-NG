@@ -75,6 +75,13 @@ struct tcp_data
 		tcp_sequence_nr += n_bytes;
 	}
 
+	// when a RST comes in
+	void forget_all() {
+		std::unique_lock<std::mutex> lck(lock);
+		len             = 0;
+		tcp_sequence_nr = 0;  // invalid
+	}
+
 	void add(const uint8_t *const what, const size_t n_bytes) {
 		std::unique_lock<std::mutex> lck(lock);
 		p = reinterpret_cast<uint8_t *>(realloc(p, len + n_bytes));
@@ -437,6 +444,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 		if (flags & FLAG_RST) {
 			clean_session = true;
+			invalid       = true;
 			DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ": RST by peer", session_id);
 		}
 		else if (flags & FLAG_SYN) {
@@ -712,6 +720,11 @@ clean:
 						destination_port, source_port,  // swapped: reply
 						session ? session->local_seq : 0, session ? peer_seq_nr + invalid_inc_ack : 0,
 						FLAG_RST, window_size, { nullptr, 0 }, MI_IP4_MIN_TCP_MTU);
+			}
+
+			if (invalid) {
+				session->tcp_to_l7.forget_all();
+				session->l7_to_tcp.forget_all();
 			}
 
 			if (session) {
