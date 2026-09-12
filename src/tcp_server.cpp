@@ -281,7 +281,7 @@ void send_syn_cookie(shm_message_queue *const shm, const std::string & out_name,
 		const uint32_t peer_seq_nr)
 {
 	uint32_t syn_cookie = my_syn_cookie(session_id, syn_cookie_salt, mss_index);
-	DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " using SYN cookie %08x, acking to %08x",
+	DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " using SYN cookie %u, acking to %u",
 			session_id, syn_cookie, peer_seq_nr);
 
 	send_tcp_packet(shm, out_name,
@@ -603,6 +603,8 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 							sessions->insert({ session_id, new_session });
 						}
 						lck.lock();
+
+						session = new_session;
 					}
 					else {
 						DOLOG(logger::ll_debug, "ERR) cannot setup session for TCP/%d, session %" PRIx64, destination_port, session_id);
