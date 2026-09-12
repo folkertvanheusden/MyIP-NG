@@ -45,9 +45,9 @@ for p in packets:
     elif tcp.flags == 'SA':
         if s == state.syn_received:
             s = state.syn_ack_sent
+            server.local_calc = server.start_local = server.local = tcp.seq
         else:
             err = '!'
-        server.local_calc = server.start_local = server.local = tcp.seq
     elif tcp.flags == 'A':
         if s == state.syn_ack_sent:
             s = state.established
