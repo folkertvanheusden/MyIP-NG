@@ -545,10 +545,12 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					}
 					else if (ack_n < session->in_flight) {
 						DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ACK %u bytes, trigger resend", session_id, ack_n);
-						resend = true;
+						session->l7_to_tcp.forget(ack_n);
+						session->local_seq += ack_n;
+						resend = true;  // sets in_flight to 0
 					}
 					else {
-						DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ACK %u bytes, suspicious as window size is %u byts",
+						DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " ACK %u bytes, suspicious as window size is %u bytes",
 								session_id, ack_n, session->local_window_size);
 					}
 				}
@@ -763,10 +765,12 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 
 		while(!stop_flag) {
 			for(auto & session: *sessions) {
+				// it would be a bug if L7 sends more data with find_sent set to true
 				if (session.second->in_flight != 0 || session.second->fin_sent == true)
 					continue;
 
 				size_t got_n    = 0;
+				// size_t use_n    = std::min(sizeof buffer, size_t(session.second->peer_window_size));
 				size_t use_n    = std::min(sizeof buffer, size_t(session.second->mss));
 				bool   end      = session.second->l7_to_tcp.peek(use_n, buffer, &got_n);
 				bool   send_fin = end ? session.second->l7_send_fin : false;
