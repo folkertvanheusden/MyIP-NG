@@ -8,7 +8,7 @@ import time
 import unittest
 
 
-class ct(unittest.TestCase):
+class ct_tcp(unittest.TestCase):
     ports_used = set()
 
     def sel_port(self):
@@ -143,10 +143,9 @@ class ct(unittest.TestCase):
                     p[TCP].sport == cfg.dest_port and
                     p[TCP].dport == local_port)
 
-        sniffer_h = AsyncSniffer(iface=cfg.interface, lfilter=got_ack, timeout=cfg.timeout, count=1)
+        sniffer_h = AsyncSniffer(iface=cfg.interface, lfilter=got_ack, timeout=cfg.timeout, count=1,
+                                 started_callback=lambda: send(ip/pl/Raw(load=teststring), verbose=0))
         sniffer_h.start()
-        time.sleep(0.5)  # it takes some time for the AsyncSniffer to really start sniffing
-        send(ip/pl/Raw(load=teststring), verbose=0)
         sniffer_h.join()
         pkt = sniffer_h.results
         self.assertNotEqual(pkt, None)
