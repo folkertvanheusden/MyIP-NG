@@ -127,28 +127,6 @@ struct session_t {
 std::atomic_bool stop_flag { false };
 std::atomic_bool dump_flag { false };
 
-std::string seq_delta_lcl(const session_t *const s, const std::optional<uint32_t> & current = { })
-{
-	uint32_t use = current.has_value() ? current.value() : s->local_seq;
-
-	// this will fail after 2^32 bytes
-	if (use < s->start_local_seq)
-		return std::format("{}", UINT32_MAX - s->start_local_seq + use);
-
-	return std::format("{}", use - s->start_local_seq);
-}
-
-std::string seq_delta_peer(const session_t *const s, const std::optional<uint32_t> & current = { })
-{
-	uint32_t use = current.has_value() ? current.value() : s->peer_seq;
-
-	// this will fail after 2^32 bytes
-	if (use < s->start_peer_seq)
-		return std::format("{}", UINT32_MAX - s->start_peer_seq + use);
-
-	return std::format("{}", use - s->start_peer_seq);
-}
-
 void sig_handler(int sig)
 {
 	if (sig == SIGINT)
@@ -430,10 +408,19 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			session->updated_ts       = get_us();
 			session->peer_window_size = window_size;
 
-			DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", local seq nr: %s, ack seq nr: %s",
-					session_id, seq_delta_lcl(session).c_str(), seq_delta_lcl(session, ack_seq_nr).c_str());
-			DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", expected peer seq nr: %s, recv peer seq nr: %s",
-					session_id, seq_delta_peer(session).c_str(), seq_delta_peer(session, peer_seq_nr).c_str());
+			if (session->local_seq != ack_seq_nr)
+				DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", local seq nr: %u, ack seq nr: %u",
+						session_id, session->local_seq, ack_seq_nr);
+			else
+				DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", local/ack seq nr: %u",
+						session_id, ack_seq_nr);
+
+			if (session->peer_seq != peer_seq_nr)
+				DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", expected peer seq nr: %u, recv peer seq nr: %u",
+						session_id, session->peer_seq, peer_seq_nr);
+			else
+				DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", expected/peer seq nr: %u",
+						session_id, peer_seq_nr);
 		}
 
 		bool invalid         = false;
@@ -776,8 +763,8 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 				bool   send_fin = end ? session.second->l7_send_fin : false;
 
 				if (got_n > 0 || send_fin) {
-					DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", local seq nr: %s",
-						session.first, seq_delta_lcl(session.second).c_str());
+					DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ", local seq nr: %u",
+						session.first, session.second->local_seq);
 
 					DOLOG(logger::ll_debug,
 							"INF) TCP sent packet to %s for session %" PRIx64 " (%d bytes%s)",
