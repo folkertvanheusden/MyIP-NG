@@ -722,12 +722,12 @@ clean:
 						FLAG_RST, window_size, { nullptr, 0 }, MI_IP4_MIN_TCP_MTU);
 			}
 
-			if (invalid) {
-				session->tcp_to_l7.forget_all();
-				session->l7_to_tcp.forget_all();
-			}
-
 			if (session) {
+				if (invalid) {
+					session->tcp_to_l7.forget_all();
+					session->l7_to_tcp.forget_all();
+				}
+
 				// send 'close' to shm server
 				uint32_t flags_temp = MI_TCP_CLOSE;
 				shm_message_queue::message *m_session = wrap_message_up_tcp(
