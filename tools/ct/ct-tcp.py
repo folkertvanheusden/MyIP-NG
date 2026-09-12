@@ -151,7 +151,42 @@ class ct_tcp(unittest.TestCase):
         self.assertNotEqual(pkt, None)
         self.assertNotEqual(len(pkt), 0)
         self.assertEqual(pkt[0][TCP].ack, my_seq + 1)
- 
+
+
+    def test_establish_dup(self):
+        # test that dut does not get confused when it receives a packet multiple times
+        ip = IP(src=cfg.src, dst=cfg.dst)
+        my_seq = self.sel_seq()
+        local_port = self.sel_port()
+        syn = TCP(sport=local_port, dport=cfg.dest_port, flags='S', seq=my_seq)
+        result = sr1(ip/syn, timeout=cfg.timeout, verbose=0)
+        self.assertEqual(result[TCP].flags, 0x12)  # should be SA
+        seq_nr = result[TCP].seq
+        syn_ack = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=my_seq + 1, window=1)
+        send(ip/syn_ack, verbose=0)
+        pl = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=my_seq + 1, window=1)
+        teststring = 'User-Agent: not relevant for the test\r\n\r\n'
+        for i in range(5):
+            send(ip/pl/Raw(load=teststring), verbose=0)
+
+        def got_ack(p):
+            return (IP in p and TCP in p and
+                    p[IP].src == cfg.dst and
+                    p[IP].dst == cfg.src and
+                    p[TCP].sport == cfg.dest_port and
+                    p[TCP].dport == local_port)
+
+        seq_2 = my_seq + 1 + len(teststring)
+        pl2 = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=seq_2, window=1)
+        sniffer_h = AsyncSniffer(iface=cfg.interface, lfilter=got_ack, timeout=cfg.timeout, count=1,
+                                 started_callback=lambda: send(ip/pl2, verbose=0))
+        sniffer_h.start()
+        sniffer_h.join()
+        pkt = sniffer_h.results
+        self.assertNotEqual(pkt, None)
+        self.assertNotEqual(len(pkt), 0)
+        self.assertEqual(pkt[0][TCP].ack, seq_2)
+
 
 if __name__ == '__main__':
     unittest.main()
