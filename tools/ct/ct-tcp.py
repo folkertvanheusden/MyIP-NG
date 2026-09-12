@@ -137,11 +137,8 @@ class ct_tcp(unittest.TestCase):
         teststring = 'User-Agent: not relevant for the test\r\n\r\n'
 
         def got_ack(p):
-            return (IP in p and TCP in p and
-                    p[IP].src == cfg.dst and
-                    p[IP].dst == cfg.src and
-                    p[TCP].sport == cfg.dest_port and
-                    p[TCP].dport == local_port)
+            return IP in p and TCP in p and p[IP].src == cfg.dst and p[IP].dst == cfg.src and \
+                    p[TCP].sport == cfg.dest_port and p[TCP].dport == local_port
 
         sniffer_h = AsyncSniffer(iface=cfg.interface, lfilter=got_ack, timeout=cfg.timeout, count=1,
                                  started_callback=lambda: send(ip/pl/Raw(load=teststring), verbose=0))
@@ -170,11 +167,8 @@ class ct_tcp(unittest.TestCase):
             send(ip/pl/Raw(load=teststring), verbose=0)
 
         def got_ack(p):
-            return (IP in p and TCP in p and
-                    p[IP].src == cfg.dst and
-                    p[IP].dst == cfg.src and
-                    p[TCP].sport == cfg.dest_port and
-                    p[TCP].dport == local_port)
+            return IP in p and TCP in p and p[IP].src == cfg.dst and p[IP].dst == cfg.src and \
+                    p[TCP].sport == cfg.dest_port and p[TCP].dport == local_port
 
         seq_2 = my_seq + 1 + len(teststring)
         pl2 = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=seq_2, window=1)
