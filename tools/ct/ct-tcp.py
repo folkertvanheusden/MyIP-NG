@@ -8,6 +8,8 @@ import time
 import unittest
 
 
+http_get_request = 'GET / HTTP/1.0\r\n\r\n'
+
 class ct_tcp(unittest.TestCase):
     ports_used = set()
 
@@ -92,8 +94,8 @@ class ct_tcp(unittest.TestCase):
         result = sr1(ip/syn, timeout=cfg.timeout, verbose=0)
         self.assertEqual(result[TCP].flags, 0x12)  # should be SA
         seq_nr = result[TCP].seq
-        syn = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=my_seq + 1, window=1)
-        teststring = 'Hello, world!'
+        teststring = http_get_request
+        syn = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=my_seq + 1, window=len(teststring))
         result = sr1(ip/syn/Raw(load=teststring), timeout=cfg.timeout, verbose=0)
         # should ACK as window size is 1
         self.assertEqual(result[TCP].flags & 0x10, 0x10)
@@ -162,7 +164,7 @@ class ct_tcp(unittest.TestCase):
         syn_ack = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=my_seq + 1, window=1)
         send(ip/syn_ack, verbose=0)
         pl = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=my_seq + 1, window=1)
-        teststring = 'GET / HTTP/1.0\r\n\r\n'
+        teststring = http_get_request
         for i in range(5):
             send(ip/pl/Raw(load=teststring), verbose=0)
 
