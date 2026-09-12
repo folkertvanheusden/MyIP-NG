@@ -11,6 +11,7 @@
 #define MI_TCP_OPEN  2
 #define MI_TCP_CLOSE 4
 #define MI_IP4_MIN_TCP_MTU 536
+#define TCP_WAIT_FIN 5000  // ms
 
 struct tcp_l7_session_t
 {

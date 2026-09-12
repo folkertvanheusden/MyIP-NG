@@ -596,12 +596,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					}
 					else {
 						DOLOG(logger::ll_debug, "ERR) cannot setup session for TCP/%d, session %" PRIx64, destination_port, session_id);
-						send_tcp_packet(shm, out_name,
-								a_to, a_from,  // swapped: reply
-								destination_port, source_port,  // swapped: reply
-								syn_cookie, peer_seq_nr,
-								FLAG_RST, window_size, { nullptr, 0 }, MI_IP4_MIN_TCP_MTU);
-
+						invalid       = true;
 						clean_session = true;
 						goto clean;
 					}
@@ -691,11 +686,6 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 							session->local_seq, session->peer_seq + tcp_pl_size,
 							FLAG_ACK, session->local_window_size, { nullptr, 0 }, session->mss) == -1) {
 					DOLOG(logger::ll_debug, "ERR) Cannot ack FIN for %" PRIx64, session_id);
-				}
-
-				if (session->fin_sent) {
-					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 " both sides sent FIN", session_id);
-					clean_session = true;
 				}
 			}
 		}
@@ -1050,6 +1040,37 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 	}
 }
 
+void run_clean(std::map<uint64_t, session_t *> *const sessions, std::shared_mutex & sessions_lock)
+{
+	set_thread_name("run_meta");
+
+	while(!stop_flag) {
+		usleep(SLEEP_INTERVAL_MS);
+
+		uint64_t now = get_us();
+
+		std::vector<uint64_t> clean_list;
+
+		{
+			std::shared_lock<std::shared_mutex> lck_u(sessions_lock);
+			for(auto & session: *sessions) {
+				if (now - session.second->updated_ts > TCP_WAIT_FIN * 1000 &&
+					session.second->half_closed == true &&
+					session.second->fin_sent == true) {
+					DOLOG(logger::ll_debug, "INF) TCP_WAIT_FIN time for %" PRIx64, session.first);
+					clean_list.push_back(session.first);
+				}
+			}
+		}
+
+		{
+			std::unique_lock<std::shared_mutex> lck_u(sessions_lock);
+			for(auto & session_id: clean_list)
+				sessions->erase(session_id);
+		}
+	}
+}
+
 void run(shm_message_queue *const shm, const std::string & out_name,
 	 const std::map<uint16_t, std::string> & mappings_in,
 	 shm_message_queue *const shm_upper,
@@ -1058,13 +1079,15 @@ void run(shm_message_queue *const shm, const std::string & out_name,
 	 const uint8_t syn_cookie_salt[16],
 	 shm_message_queue *const shm_meta, const addr & local_addr)
 {
-	std::thread rx  ([&] { run_in  (shm, mappings_in, icmp_error_name, out_name,
+	std::thread rx   ([&] { run_in   (shm, mappings_in, icmp_error_name, out_name,
 				sessions, sessions_lock, sessions_cv, syn_cookie_salt, shm_meta); });
-	std::thread tx  ([&] { run_out (shm_upper, out_name, shm, sessions, sessions_lock, sessions_cv); });
-	std::thread meta([&] { run_meta(shm, out_name, local_addr, shm_meta, sessions, sessions_lock); });
-	meta.join();
-	tx  .join();
-	rx  .join();
+	std::thread tx   ([&] { run_out  (shm_upper, out_name, shm, sessions, sessions_lock, sessions_cv); });
+	std::thread meta ([&] { run_meta (shm, out_name, local_addr, shm_meta, sessions, sessions_lock); });
+	std::thread clean([&] { run_clean(sessions, sessions_lock); });
+	clean.join();
+	meta .join();
+	tx   .join();
+	rx   .join();
 }
 
 std::optional<uint64_t> send_meta_request(shm_message_queue *const shm_meta, const std::string & peer_name, const std::string & request)
