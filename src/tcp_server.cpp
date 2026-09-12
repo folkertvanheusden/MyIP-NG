@@ -483,8 +483,21 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 					continue;
 				}
 				else {
-					DOLOG(logger::ll_debug, "ERR) Received SYN for session %" PRIx64 " in ESTABLISHED state", session_id);
+					DOLOG(logger::ll_debug, "ERR) Received SYN for session %" PRIx64 " in ESTABLISHED state (loc/rem FIN: %d/%d)",
+							session_id, session->fin_sent, session->half_closed);
 					free(m);
+					if (session->fin_sent == false || session->half_closed == false)
+						continue;
+
+					// quick release
+					DOLOG(logger::ll_debug, "INF) quick release for %" PRIx64, session_id);
+					lck.unlock();  // FIXME
+					{
+						std::unique_lock<std::shared_mutex> lck(sessions_lock);
+						sessions->erase(session_id);
+						delete session;
+					}
+					lck.lock();
 					continue;
 				}
 			}
@@ -713,14 +726,6 @@ clean:
 				if (shm->send_message(session->shm_peer, m_session, false) == false)
 					DOLOG(logger::ll_debug, "INF) failed to transmit CLOSE message to %s for %" PRIx64, session->shm_peer, session_id);
 				free(m_session);
-
-				lck.unlock();  // FIXME
-				{
-					std::unique_lock<std::shared_mutex> lck(sessions_lock);
-					sessions->erase(session_id);
-					delete session;
-				}
-				lck.lock();
 			}
 		}
 
