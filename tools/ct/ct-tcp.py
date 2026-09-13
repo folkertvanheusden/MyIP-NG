@@ -9,6 +9,7 @@ import unittest
 
 
 http_get_request = 'GET / HTTP/1.0\r\n\r\n'
+retry_count = 5
 
 class ct_tcp(unittest.TestCase):
     ports_used = set()
@@ -79,7 +80,7 @@ class ct_tcp(unittest.TestCase):
 
         # ...and retry
         syn = TCP(sport=self.sel_port(), dport=cfg.dest_port, flags='S', seq=self.sel_seq())
-        result = sr1(ip/syn, timeout=cfg.timeout, verbose=0)
+        result = sr1(ip/syn, timeout=cfg.timeout, verbose=0, retry=retry_count)
         self.assertEqual(result[TCP].flags, 0x12)
         self.assertNotEqual(result[TCP].seq, seq_nr1)
         self.assertNotEqual(result[TCP].seq, seq_nr2)
@@ -90,7 +91,7 @@ class ct_tcp(unittest.TestCase):
         my_seq = self.sel_seq()
         local_port = self.sel_port()
         syn = TCP(sport=local_port, dport=cfg.dest_port, flags='S', seq=my_seq)
-        result = sr1(ip/syn, timeout=cfg.timeout, verbose=0)
+        result = sr1(ip/syn, timeout=cfg.timeout, verbose=0, retry=retry_count)
         self.assertEqual(result[TCP].flags, 0x12)  # should be SA
         seq_nr = result[TCP].seq
         teststring = http_get_request
@@ -133,6 +134,7 @@ class ct_tcp(unittest.TestCase):
             self.assertEqual(result[TCP].flags, 0x12)  # should be SA
             seq_nr = result[TCP].seq
             # interesting corner case: SYN/SYNACK/RST/data+ACK
+            # when i == 0, an ACK is send before the RST
             if i == 0:
                 ack = TCP(sport=local_port, dport=cfg.dest_port, flags='A', ack=seq_nr + 1, seq=my_seq + 1, window=1)
                 send(ip/ack, verbose=0)
@@ -142,7 +144,7 @@ class ct_tcp(unittest.TestCase):
 
             # send data
             data = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=my_seq + 1, window=1)
-            result = sr1(ip/data/Raw(load='test'), timeout=cfg.timeout, verbose=0)
+            result = sr1(ip/data/Raw(load='test'), timeout=cfg.timeout, verbose=0, retry=retry_count)
             self.assertEqual(result[TCP].flags, 0x04)  # should be R
 
 
@@ -205,6 +207,48 @@ class ct_tcp(unittest.TestCase):
         self.assertNotEqual(pkt, None)
         self.assertNotEqual(len(pkt), 0)
         self.assertEqual(pkt[0][TCP].ack, seq_2)
+
+
+    def test_options(self):
+        ip = IP(src=cfg.src, dst=cfg.dst)
+        my_seq = self.sel_seq()
+        local_port = self.sel_port()
+        syn = TCP(sport=local_port, dport=cfg.dest_port, flags='S', seq=my_seq, options=[('MSS', 600), ('SAckOK', ''), ('Timestamp', (4277908643, 0)), ('NOP', 0), ('NOP', 0)])
+        result = sr1(ip/syn, timeout=cfg.timeout, verbose=0)
+        seq_nr = result[TCP].seq
+        self.assertEqual(result[TCP].flags, 0x12)  # should be SA
+        ack = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=my_seq + 1)
+        result = sr1(ip/ack, timeout=cfg.timeout, verbose=0)
+
+        # send HTTP GET request and process answer
+        def stop_condition(pkt):
+            if not TCP in pkt:
+                return False
+
+            # Payload length
+            tcp = pkt[TCP]
+            payload_len = len(bytes(tcp.payload))
+            print(payload_len)
+            if payload_len > 600:
+                raise Exception(f'Payload too large - {payload_len} bytes')
+
+            if payload_len > 0:
+                ack = IP(src=cfg.src, dst=cfg.dst) / TCP(sport=local_port, dport=cfg.dest_port, flags='A', seq=tcp.ack, ack=tcp.seq + payload_len)
+                send(ack, verbose=False)
+
+            # FIN?
+            return (pkt[TCP].flags & 0x01) == 0x01
+
+        teststring = http_get_request
+        data = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=my_seq + 1, window=8192)
+        sniffer_h = AsyncSniffer(iface=cfg.interface, timeout=cfg.timeout,
+                                 started_callback=lambda: send(ip/data/Raw(load=teststring), verbose=0), stop_filter=stop_condition)
+        sniffer_h.start()
+        sniffer_h.join()
+
+        # clean-up
+        fin = TCP(sport=local_port, dport=cfg.dest_port, flags='FA', ack=seq_nr + 1, seq=my_seq + 1)
+        result = sr1(ip/fin, timeout=cfg.timeout, verbose=0)
 
 
 if __name__ == '__main__':
