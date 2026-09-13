@@ -9,6 +9,12 @@ If 192.168.1.1 is the local IP-address, execute:
 
 this prevents that the Linux kernel will interfere.
 
+Also:
+
+* sudo ethtool -K eth0 tso off gso off
+
+makes sure things like the TCP "MSS"-option is not ignored (eth0 is the interface via which you talk to the DUT).
+
 
 running
 -------
