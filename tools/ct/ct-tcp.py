@@ -95,19 +95,26 @@ class ct_tcp(unittest.TestCase):
         seq_nr = result[TCP].seq
         teststring = http_get_request
         time.sleep(0.15)
-        syn = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=my_seq + 1, window=len(teststring))
-        result = sr1(ip/syn/Raw(load=teststring), timeout=cfg.timeout, verbose=0)
+        data = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=my_seq + 1, window=len(teststring))
+        result = sr1(ip/data/Raw(load=teststring), timeout=cfg.timeout, verbose=0)
         # should ACK as window size is 1
         self.assertEqual(result[TCP].flags & 0x10, 0x10)
         # verify sequence numbers
         self.assertEqual(result[TCP].ack, my_seq + 1 + len(teststring))
         self.assertEqual(result[TCP].seq, seq_nr + 1)
+        while True:
+            fin = TCP(sport=local_port, dport=cfg.dest_port, flags='F', ack=seq_nr + 1, seq=my_seq + 1 + len(teststring))
+            result = sr1(ip/fin, timeout=cfg.timeout, verbose=0)
+            if result:
+                self.assertEqual(result[TCP].flags, 0x10)
+                break
+            time.sleep(0.1)
 
 
     def test_establish_happy_flow(self):
         # test a full setup with sending data, parallel
         ths = []
-        for i in range(100):
+        for i in range(128):
             th = threading.Thread(target=self.happy_flow)
             th.start()
             ths.append(th)
