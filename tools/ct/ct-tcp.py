@@ -137,7 +137,7 @@ class ct_tcp(unittest.TestCase):
         seq_nr = result[TCP].seq
         syn_ack = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=my_seq + 1, window=1)
         send(ip/syn_ack, verbose=0)
-        # + 100 instead of + 1 so that DUT things 99 bytes are missing
+        # + 100 instead of + 1 so that DUT thinks 99 bytes are missing
         pl = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=my_seq + 100, window=1)
         teststring = 'User-Agent: not relevant for the test\r\n\r\n'
 

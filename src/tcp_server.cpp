@@ -690,6 +690,16 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			}
 			else {
 				DOLOG(logger::ll_debug, "ERR) TCP out of order packet, expecting seq %u, got %u for session %" PRIx64, session->peer_seq, peer_seq_nr, session_id);
+
+				if (send_tcp_packet(shm, out_name,
+							a_to, a_from,  // swapped: reply
+							destination_port, source_port,  // swapped: reply
+							session->local_seq, session->peer_seq,
+							FLAG_ACK, session->local_window_size, { nullptr, 0 },
+							session->mss) == -1) {
+					clean_session = true;
+					DOLOG(logger::ll_debug, "ERR) Could not ACK data for session %" PRIx64, session_id);
+				}
 			}
 		}
 		else {
