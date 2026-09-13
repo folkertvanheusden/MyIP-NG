@@ -85,8 +85,7 @@ class ct_tcp(unittest.TestCase):
         self.assertNotEqual(result[TCP].seq, seq_nr2)
 
 
-    def test_establish_happy_flow(self):
-        # test a full setup with sending data
+    def happy_flow(self):
         ip = IP(src=cfg.src, dst=cfg.dst)
         my_seq = self.sel_seq()
         local_port = self.sel_port()
@@ -95,6 +94,7 @@ class ct_tcp(unittest.TestCase):
         self.assertEqual(result[TCP].flags, 0x12)  # should be SA
         seq_nr = result[TCP].seq
         teststring = http_get_request
+        time.sleep(0.15)
         syn = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=my_seq + 1, window=len(teststring))
         result = sr1(ip/syn/Raw(load=teststring), timeout=cfg.timeout, verbose=0)
         # should ACK as window size is 1
@@ -102,6 +102,17 @@ class ct_tcp(unittest.TestCase):
         # verify sequence numbers
         self.assertEqual(result[TCP].ack, my_seq + 1 + len(teststring))
         self.assertEqual(result[TCP].seq, seq_nr + 1)
+
+
+    def test_establish_happy_flow(self):
+        # test a full setup with sending data, parallel
+        ths = []
+        for i in range(100):
+            th = threading.Thread(target=self.happy_flow)
+            th.start()
+            ths.append(th)
+        for th in ths:
+            th.join()
 
 
     def test_establish_rst(self):
