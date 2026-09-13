@@ -393,16 +393,16 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			continue;
 		}
 
-		DOLOG(logger::ll_debug, "INF) TCP packet from %d to %d, session id: %" PRIx64 ", flags: %s, pl size: %d",
-				source_port, destination_port, session_id,
-				flags_to_str(flags).c_str(),
-				tcp_pl_size);
-
 		std::shared_lock<std::shared_mutex> lck(sessions_lock);
 		session_t *session = nullptr;
 		auto it = sessions->find(session_id);
 		if (it != sessions->end())
 			session = it->second;
+
+		DOLOG(logger::ll_debug, "INF) TCP packet from %d to %d, session id: %" PRIx64 "%s, flags: %s, pl size: %d",
+				source_port, destination_port, session_id, session?"":"N",
+				flags_to_str(flags).c_str(),
+				tcp_pl_size);
 
 		if (session) {
 			session->updated_ts       = get_us();
@@ -429,9 +429,17 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 		bool clean_session   = false;
 		bool acked_packet    = false;
 
-		if (flags & FLAG_RST) {
-			clean_session = true;
+		if (session && session->state == closed) {
+			DOLOG(logger::ll_debug, "INF) packet for session %" PRIx64 " while it is already closed", session_id);
 			invalid       = true;
+			invalid_w_rst = true;
+			goto clean;
+		}
+		else if (flags & FLAG_RST) {
+			invalid       = true;
+			invalid_w_rst = false;
+			if (session)
+				session->state = closed;
 			DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ": RST by peer", session_id);
 			goto clean;
 		}
@@ -713,6 +721,8 @@ clean:
 						destination_port, source_port,  // swapped: reply
 						session ? session->local_seq : 0, session ? peer_seq_nr + invalid_inc_ack : 0,
 						FLAG_RST, window_size, { nullptr, 0 }, MI_IP4_MIN_TCP_MTU);
+				if (session)
+					session->state = closed;
 			}
 
 			if (session) {
@@ -1068,8 +1078,8 @@ void run_clean(std::map<uint64_t, session_t *> *const sessions, std::shared_mute
 			std::shared_lock<std::shared_mutex> lck_u(sessions_lock);
 			for(auto & session: *sessions) {
 				if (now - session.second->updated_ts > TCP_WAIT_FIN * 1000 &&
-					session.second->half_closed == true &&
-					session.second->fin_sent == true) {
+					((session.second->half_closed == true && session.second->fin_sent == true) ||
+					 session.second->state == closed)) {
 					DOLOG(logger::ll_debug, "INF) TCP_WAIT_FIN time for %" PRIx64, session.first);
 					clean_list.push_back(session.first);
 				}
