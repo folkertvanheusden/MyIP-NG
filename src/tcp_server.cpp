@@ -433,6 +433,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			clean_session = true;
 			invalid       = true;
 			DOLOG(logger::ll_debug, "INF) TCP session %" PRIx64 ": RST by peer", session_id);
+			goto clean;
 		}
 		else if (flags & FLAG_SYN) {
 			invalid_inc_ack = true;
@@ -1077,8 +1078,13 @@ void run_clean(std::map<uint64_t, session_t *> *const sessions, std::shared_mute
 
 		{
 			std::unique_lock<std::shared_mutex> lck_u(sessions_lock);
-			for(auto & session_id: clean_list)
-				sessions->erase(session_id);
+			for(auto & session_id: clean_list) {
+				auto it = sessions->find(session_id);
+				if (it != sessions->end()) {
+					delete it->second;
+					sessions->erase(it);
+				}
+			}
 		}
 	}
 }
