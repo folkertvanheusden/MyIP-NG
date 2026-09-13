@@ -106,24 +106,26 @@ class ct_tcp(unittest.TestCase):
 
     def test_establish_rst(self):
         # should not allow data on RST connection
-        ip = IP(src=cfg.src, dst=cfg.dst)
-        my_seq = self.sel_seq()
-        local_port = self.sel_port()
-        syn = TCP(sport=local_port, dport=cfg.dest_port, flags='S', seq=my_seq)
-        result = sr1(ip/syn, timeout=cfg.timeout, verbose=0)
-        self.assertEqual(result[TCP].flags, 0x12)  # should be SA
-        seq_nr = result[TCP].seq
-        # interesting corner case: SYN/SYNACK/RST/data+ACK (TODO)
-        ack = TCP(sport=local_port, dport=cfg.dest_port, flags='A', ack=seq_nr + 1, seq=my_seq + 1, window=1)
-        send(ip/ack, verbose=0)
-        # RST
-        rst = TCP(sport=local_port, dport=cfg.dest_port, flags='R', ack=seq_nr + 1, seq=my_seq + 1, window=1)
-        send(ip/rst, verbose=0)
+        for i in range(2):
+            ip = IP(src=cfg.src, dst=cfg.dst)
+            my_seq = self.sel_seq()
+            local_port = self.sel_port()
+            syn = TCP(sport=local_port, dport=cfg.dest_port, flags='S', seq=my_seq)
+            result = sr1(ip/syn, timeout=cfg.timeout, verbose=0)
+            self.assertEqual(result[TCP].flags, 0x12)  # should be SA
+            seq_nr = result[TCP].seq
+            # interesting corner case: SYN/SYNACK/RST/data+ACK
+            if i == 0:
+                ack = TCP(sport=local_port, dport=cfg.dest_port, flags='A', ack=seq_nr + 1, seq=my_seq + 1, window=1)
+                send(ip/ack, verbose=0)
+            # RST
+            rst = TCP(sport=local_port, dport=cfg.dest_port, flags='R', ack=seq_nr + 1, seq=my_seq + 1, window=1)
+            send(ip/rst, verbose=0)
 
-        # send data
-        data = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=my_seq + 1, window=1)
-        result = sr1(ip/data/Raw(load='test'), timeout=cfg.timeout, verbose=0)
-        self.assertEqual(result[TCP].flags, 0x04)  # should be R
+            # send data
+            data = TCP(sport=local_port, dport=cfg.dest_port, flags='PA', ack=seq_nr + 1, seq=my_seq + 1, window=1)
+            result = sr1(ip/data/Raw(load='test'), timeout=cfg.timeout, verbose=0)
+            self.assertEqual(result[TCP].flags, 0x04)  # should be R
 
 
     def test_establish_resend(self):
