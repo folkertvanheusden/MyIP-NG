@@ -627,7 +627,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				}
 			}
 		}
-		else {
+		else if ((flags & FLAG_FIN) == 0) {
 			DOLOG(logger::ll_debug, "ERR) Session %" PRIx64 " has an unexpected state - pl size: %d, flags: %s", session_id, tcp_pl_size, flags_to_str(flags).c_str());
 			free(m);
 			continue;
