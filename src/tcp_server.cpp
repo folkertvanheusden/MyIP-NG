@@ -65,9 +65,11 @@ struct tcp_data
 	}
 
 	// used when data is acked
-	void forget(const size_t n_bytes) {
+	void forget(const size_t n_bytes_in) {
 		std::unique_lock<std::mutex> lck(lock);
-		assert(n_bytes <= len);
+		// can be cleared in meta-thread without
+		// the run_in thread knowing of it
+		size_t n_bytes = std::min(n_bytes_in, len);
 		size_t n_left = len - n_bytes;
 		if (n_left > 0)
 			memmove(&p[0], &p[n_bytes], n_left);
