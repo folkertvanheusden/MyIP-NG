@@ -501,11 +501,12 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				if (it == mappings_in.end()) {
 					DOLOG(logger::ll_debug, "ERR) No mapping for port %d", destination_port);
 					invalid = true;
+					invalid_w_rst = !(flags & FLAG_RST);  // no RST if the flags already contain RST
 				}
 				else if (flags & (FLAG_FIN | FLAG_RST | FLAG_PSH | FLAG_URG | FLAG_ACK)) {
 					DOLOG(logger::ll_debug, "ERR) Invalid flags set (%s) combined with SYN in a new session -> RST", flags_to_str(flags).c_str());
 					invalid = true;
-					invalid_w_rst = !(flags & FLAG_RST);  // no RST if the flags already contain RST
+					invalid_w_rst = !(flags & FLAG_RST);
 				}
 				else {
 					send_syn_cookie(shm, out_name,
