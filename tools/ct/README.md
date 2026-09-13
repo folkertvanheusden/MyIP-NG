@@ -9,16 +9,21 @@ If 192.168.1.1 is the local IP-address, execute:
 
 this prevents that the Linux kernel will interfere.
 
-Also:
+Sometimes offloading functionality of a network-apdapter/system interferes:
+Linux and Windows 11 under QEMU then fail to adhere to the TCP MSS option.
+FreeBSD 15 runs fine immediately.
 
+To disable the offloading in Linux, enter this:
 * sudo ethtool -K eth0 tso off gso off
-
-makes sure things like the TCP "MSS"-option is not ignored (eth0 is the interface on the DUT, in case it is a Linux system).
+(if the DUT is a Linux system that is).
 
 
 running
 -------
 
-If 192.168.1.2 is the DUT (device under test), enter e.g.:
+sudo ./ct-tcp.py
 
-sudo ./ct-syn.py 192.168.1.1 192.168.1.2
+You may want to edit configure.py first.
+
+
+Written by Folkert van Heusden, MIT license
