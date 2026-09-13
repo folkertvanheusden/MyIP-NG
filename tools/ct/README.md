@@ -13,7 +13,7 @@ Also:
 
 * sudo ethtool -K eth0 tso off gso off
 
-makes sure things like the TCP "MSS"-option is not ignored (eth0 is the interface via which you talk to the DUT).
+makes sure things like the TCP "MSS"-option is not ignored (eth0 is the interface on the DUT, in case it is a Linux system).
 
 
 running
