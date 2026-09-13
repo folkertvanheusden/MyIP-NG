@@ -96,7 +96,7 @@ void tcp_data_free_function(tcp_data & p)
 }
 
 struct session_t {
-	uint64_t    updated_ts;
+	std::atomic_uint64_t updated_ts { };
 
 	bool        is_client;
 	char        shm_peer[max_id_length];  // only valid for is_client == true
@@ -613,8 +613,10 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 							sessions->insert({ session_id, new_session });
 						}
 						lck.lock();
-
-						session = new_session;
+						// during the unlock, the session may have been deleted
+						auto it = sessions->find(session_id);
+						if (it != sessions->end())
+							session = it->second;
 					}
 					else {
 						DOLOG(logger::ll_debug, "ERR) cannot setup session for TCP/%d, session %" PRIx64, destination_port, session_id);
