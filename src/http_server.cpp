@@ -131,6 +131,9 @@ void process_http_request(http_session_t *const session)
 
 	std::string recv_buffer;
 	do {
+		if (session->stop_flag)
+			return;
+
 		if (recv_buffer.size() > 32768) {
 			DOLOG(logger::ll_debug, "DDOS error?");
 			end_session(session);
@@ -147,9 +150,10 @@ void process_http_request(http_session_t *const session)
 			recv_buffer += c;
 		}
 		else {
-			printf("hier001\n");
-			auto incoming = session->incoming.pop();
-			recv_buffer += std::string(reinterpret_cast<const char *>(incoming.data()), incoming.size());
+			auto incoming = session->incoming.pop(100);
+			if (incoming.has_value() == false)
+				continue;
+			recv_buffer += std::string(reinterpret_cast<const char *>(incoming.value().data()), incoming.value().size());
 		}
 	}
 	while(recv_buffer.find("\r\n\r\n") == std::string::npos);
