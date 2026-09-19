@@ -210,7 +210,6 @@ bool shm_message_queue::put_message(message *const m)
 {
 	uint32_t length            = m->size;
 	size_t   total_msg_length  = sizeof(message) + length;
-	bool     ok                = false;
 	size_t   padded_msg_length = PAD8(total_msg_length);
 	auto    *put_shm           = get_shm;  // same channel
 	assert(put_shm);
@@ -240,8 +239,6 @@ bool shm_message_queue::put_message(message *const m)
 
 			if (int err = pthread_cond_broadcast(&put_shm->condition_put); err != 0)
 				DOLOG(logger::ll_error, "pthread_cond_signal failed: %s", strerror(err));
-			else
-				ok = true;
 			break;
 		}
 

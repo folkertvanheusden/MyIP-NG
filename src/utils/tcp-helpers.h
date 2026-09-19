@@ -42,6 +42,7 @@ struct tcp_l7_session_t
 		to  (to  ), to_port  (to_port  )
 	{
 		in_th = new std::thread([&] {
+				DOLOG(logger::ll_debug, "tcp_l7_session_t incoming message handler running");
 				receive_incoming_from_message_queue(this->shm_to_l7, &incoming);
 			});
 	}

@@ -80,7 +80,6 @@ void receive_incoming_from_message_queue(shm_message_queue *const mq, queue<std:
 {
 	assert(mq);
 	while(!stop_flag) {
-		printf("hier001\n");
 		shm_message_queue::message *m = mq->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
 		if (!m)
 			continue;

@@ -661,13 +661,11 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 			if (peer_seq_nr == session->peer_seq) {
 				bool ok = true;
 				if (tcp_pl_size > 0) {
-					DOLOG(logger::ll_debug, "INF) send MI_TCP_FIN to L7 for %" PRIx64, session_id);
-					uint32_t flags_temp = session->half_closed ? MI_TCP_FIN : 0;
 					shm_message_queue::message *m_session = wrap_message_to_tcp_l7(
 							session_id, 
 							from_len, from, source_port,
 							to_len,   to,   destination_port,
-							flags_temp,
+							0,
 							tcp_pl_size, &pl[header_size]);
 					ok = session->shm_out->put_message(m_session);
 					free(m_session);
@@ -736,6 +734,15 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				if (session->half_closed == false) {
 					session->peer_seq++;
 					session->half_closed = true;
+
+					shm_message_queue::message *fin_session = wrap_message_to_tcp_l7(
+							session_id,
+							from_len, from, source_port,
+							to_len,   to,   destination_port,
+							MI_TCP_FIN,
+							0, nullptr);
+					session->shm_out->put_message(fin_session);
+					free(fin_session);
 				}
 
 				if (acked_packet == false && send_tcp_packet(shm, out_name,
