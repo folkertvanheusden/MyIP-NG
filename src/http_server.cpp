@@ -34,14 +34,16 @@ struct http_session_t: public tcp_l7_session_t
 	WOLFSSL_CTX      *const ctx;
 	WOLFSSL          *ssl { nullptr };
 
-	http_session_t(const uint64_t session_id, const std::string & out_name,
-		shm_message_queue *const shm,
+	http_session_t(const uint64_t session_id,
+		shm_message_queue *const shm_in, shm_message_queue *const shm_out,
 		const addr_ip4 from, const uint16_t from_port,
 		const addr_ip4 to,   const uint16_t to_port,
 		WOLFSSL_CTX *const ctx):
-		tcp_l7_session_t(session_id, out_name, shm, from, from_port, to, to_port),
+		tcp_l7_session_t(session_id, shm_in, shm_out, from, from_port, to, to_port),
 		ctx(ctx)
 	{
+		assert(shm_in);
+		assert(shm_out);
 	}
 };
 
@@ -145,6 +147,7 @@ void process_http_request(http_session_t *const session)
 			recv_buffer += c;
 		}
 		else {
+			printf("hier001\n");
 			auto incoming = session->incoming.pop();
 			recv_buffer += std::string(reinterpret_cast<const char *>(incoming.data()), incoming.size());
 		}
@@ -284,117 +287,44 @@ void process_http_request(http_session_t *const session)
 	end_session(session);
 }
 
-void run_in(shm_message_queue *const shm, const std::string & out_name,
-		std::map<uint64_t, std::pair<std::thread *, http_session_t *> > *const sessions, std::mutex & sessions_lock,
-		shm_message_queue *const shm_meta,
-		WOLFSSL_CTX *const ctx)
+void delete_session(std::pair<std::thread *, http_session_t *> & s)
 {
-	set_thread_name("run_in");
-
-	while(!stop_flag) {
-		// finish_sessions
-		{
-			std::vector<uint64_t> delete_these;
-
-			std::unique_lock<std::mutex> lck(sessions_lock);
-			for(auto & session: *sessions) {
-				if (session.second.second->finished) {
-					DOLOG(logger::ll_debug, "Deleting session/thread %" PRIx64, session.first);
-					session.second.second->stop_flag = true;
-					session.second.first->join();
-					delete session.second.first;
-					delete session.second.second;
-					delete_these.push_back(session.first);
-				}
-			}
-
-			for(auto session: delete_these)
-				sessions->erase(session);
-
-			// used for certificat reloading
-			if (sessions->empty() && please_terminate == true) {
-				stop_flag = true;
-				DOLOG(logger::ll_info, "STOP requested, terminating");
-				continue;
-			}
-		}
-
-		// process incoming data
-		shm_message_queue::message *m = shm->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
-		if (!m)
-			continue;
-
-		uint64_t       session_id   = 0;
-                size_t         from_len     = 0;
-		uint16_t       from_port    = 0;
-                size_t         to_len       = 0;
-		uint16_t       to_port      = 0;
-                size_t         pl_len       = 0;
-		uint32_t       flags        = 0;
-                const uint8_t *from         = nullptr;
-                const uint8_t *to           = nullptr;
-                const uint8_t *pl           = nullptr;
-		if (unwrap_message_up_tcp(
-				m,
-				&session_id,
-				&from_len, &from,
-				&from_port,
-				&to_len, &to,
-				&to_port,
-				&flags,
-				&pl_len, &pl) == false) {
-                        DOLOG(logger::ll_error, "ERR) Corrupt message in shared memory segment!");
-                        free(m);
-                        continue; 
-		}
-
-		DOLOG(logger::ll_debug, "Data for session %" PRIx64 "%s", session_id, flags & MI_TCP_FIN ? " +FIN": "");
-
-		http_session_t *hs = nullptr;
-		{
-			std::unique_lock<std::mutex> lck(sessions_lock);
-			auto it = sessions->find(session_id);
-			if (it == sessions->end()) {
-				if (flags & MI_TCP_OPEN) {
-					DOLOG(logger::ll_debug, "Session %" PRIx64 " not known - new session", session_id);
-					hs = new http_session_t(
-							session_id, out_name, shm,
-							addr_ip4(from, from_len), from_port,
-							addr_ip4(to, to_len), to_port, ctx);
-					std::thread *th = new std::thread([hs] { process_http_request(hs); });
-					auto rc = sessions->insert({ session_id, { th, hs } });
-					assert(rc.second);
-				}
-				else {
-					DOLOG(logger::ll_debug, "Session %" PRIx64 " not known");
-					free(m);
-					continue;
-				}
-			}
-			else {
-				hs = it->second.second;
-
-				if (flags & MI_TCP_CLOSE) {
-					DOLOG(logger::ll_debug, "Session %" PRIx64 ": close");
-					hs->stop_flag = true;
-				}
-			}
-		}
-
-		if (hs)
-			hs->incoming.push(std::vector<uint8_t>(pl, &pl[pl_len]));
-		else
-			DOLOG(logger::ll_warning, "HTTP session %" PRIx64 " not found", session_id);
-
-		free(m);
+	s.second->stop_flag = true;
+	if (s.first) {
+		s.first->join();
+		delete s.first;
 	}
+	delete s.second->shm_out;
+	delete s.second->shm_in;
+	delete s.second;
 }
 
-void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, std::pair<std::thread *, http_session_t *> > *const sessions, std::mutex & sessions_lock)
+void finish_sessions(std::map<uint64_t, std::pair<std::thread *, http_session_t *> > *const sessions, std::mutex & sessions_lock)
+{
+	std::vector<uint64_t> delete_these;
+
+	std::unique_lock<std::mutex> lck(sessions_lock);
+	for(auto & session: *sessions) {
+		if (session.second.second->finished) {
+			DOLOG(logger::ll_debug, "Cleaning-up session/thread %" PRIx64, session.first);
+			delete_session(session.second);
+			delete_these.push_back(session.first);
+		}
+	}
+
+	for(auto session: delete_these)
+		sessions->erase(session);
+}
+
+void run_meta(shm_message_queue *const shm_meta,
+		std::map<uint64_t, std::pair<std::thread *, http_session_t *> > *const sessions, std::mutex & sessions_lock,
+		WOLFSSL_CTX *const ctx)
 {
 	set_thread_name("run_meta");
 
 	while(!stop_flag) {
+		finish_sessions(sessions, sessions_lock);
+
 		shm_message_queue::message *m = shm_meta->wait_for_message(SLEEP_INTERVAL_MS, shm_message_queue::msg_any, { });
 		if (!m)
 			continue;
@@ -407,9 +337,13 @@ void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, std::pair<st
 			continue;
 		}
 
-		enum { close }          action  = close;
+		enum { open, close }    action  = close;
 		std::optional<uint64_t> session_id;
 		bool                    invalid = false;
+		std::optional<addr_ip4> from_addr;  // peer
+		std::optional<int>      from_port;
+		std::optional<addr_ip4> to_addr;  // here
+		std::optional<int>      to_port;
 
 		for(auto & line: lines) {
 			auto parts = split(line, "=");
@@ -418,6 +352,8 @@ void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, std::pair<st
 			if (parts[0] == "action") {
 				if (parts[1] == "close")
 					action = close;
+				else if (parts[1] == "open")
+					action = open;
 				else {
 					DOLOG(logger::ll_error, "ERR) TCP meta: invalid action \"%s\"", parts[1].c_str());
 					invalid = true;
@@ -426,6 +362,18 @@ void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, std::pair<st
 			}
 			else if (parts[0] == "session-id") {
 				session_id = my_stoull_hex(parts[1]);
+			}
+			else if (parts[0] == "from_addr") {
+				from_addr = addr_ip4(parts[1], ".", false);
+			}
+			else if (parts[0] == "from_port") {
+				from_port = my_stoi_dec(parts[1]);
+			}
+			else if (parts[0] == "to_addr") {
+				to_addr = addr_ip4(parts[1], ".", false);
+			}
+			else if (parts[0] == "to_port") {
+				to_port = my_stoi_dec(parts[1]);
 			}
 			else {
 				DOLOG(logger::ll_error, "Invalid command (%s)", kv.c_str());
@@ -437,20 +385,52 @@ void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, std::pair<st
 		if (invalid) {
 			DOLOG(logger::ll_warning, "Ignoring invalid shm command");
 		}
+		else if (session_id.has_value() == false) {
+			DOLOG(logger::ll_warning, "session id missing in shm command");
+		}
 		else if (action == close) {
 			DOLOG(logger::ll_debug, "\"close\" for %" PRIx64 " received", session_id.value());
 
 			std::unique_lock<std::mutex> lck(sessions_lock);
 			auto it = sessions->find(session_id.value());
 			if (it != sessions->end()) {
-				it->second.second->stop_flag = true;
-				it->second.first->join();
-				delete it->second.first;
-				delete it->second.second;
+				delete_session(it->second);
 				sessions->erase(it);
 			}
 			else {
 				DOLOG(logger::ll_warning, "Session %" PRIx64 " already gone", session_id.value());
+			}
+		}
+		else if (action == open && from_addr.has_value() && from_port.has_value() && to_addr.has_value() && to_port.has_value()) {
+			DOLOG(logger::ll_debug, "\"open\" for %" PRIx64 " received", session_id.value());
+
+			// TODO start thread that listens on the new shared memory segment named by the session_id in hex
+			// all L7s have an RX and a TX shm
+			// tcp has a thread per L7 for L7-TX
+			// en/of tcp heeft een queue van L7-TX shm-pointers (zie run_out) die iets te doen hebben <-- hoe wordt die gevuld?
+
+			std::string shm_name_base { std::format("{:x}_", session_id.value()) };
+			auto shm_in  = new shm_message_queue(shm_name_base + "rx", 16384);
+			shm_in ->begin();  // TODO error handling
+			auto shm_out = new shm_message_queue(shm_name_base + "tx", 16384);
+			shm_out->begin();  // TODO error handling
+
+			std::unique_lock<std::mutex> lck(sessions_lock);
+			auto it = sessions->find(session_id.value());
+			DOLOG(logger::ll_debug, "New session %" PRIx64, session_id);
+			http_session_t *hs = new http_session_t(
+					session_id.value(),
+					shm_in, shm_out,
+					from_addr.value(), from_port.value(),
+					to_addr  .value(), to_port  .value(),
+					ctx);
+			std::thread *th = new std::thread([hs] { process_http_request(hs); });
+			auto rc = sessions->insert({ session_id.value(), { th, hs } });
+			if (rc.second == false) {
+				hs->stop_flag = true;
+				th->join();
+				delete th;
+				delete hs;
 			}
 		}
 		else {
@@ -463,15 +443,12 @@ void run_meta(shm_message_queue *const shm_meta, std::map<uint64_t, std::pair<st
 	DOLOG(logger::ll_warning, "HTTP meta handler stopping");
 }
 
-void run(shm_message_queue *const shm, const std::string & out_name,
-		shm_message_queue *const shm_meta,
-		std::map<uint64_t, std::pair<std::thread *, http_session_t *> > *const sessions, std::mutex & sessions_lock,
-		WOLFSSL_CTX *const tls_ctx)
+void run(shm_message_queue *const shm_meta,
+	std::map<uint64_t, std::pair<std::thread *, http_session_t *> > *const sessions, std::mutex & sessions_lock,
+	WOLFSSL_CTX *const tls_ctx)
 {
-	std::thread rx  ([&] { run_in  (shm, out_name, sessions, sessions_lock, shm_meta, tls_ctx); });
-	std::thread meta([&] { run_meta(shm_meta,      sessions, sessions_lock); });
+	std::thread meta([&] { run_meta(shm_meta, sessions, sessions_lock, tls_ctx); });
 	meta.join();
-	rx.join();
 }
 
 int main(int argc, char *argv[])
@@ -503,11 +480,6 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 	}
-	std::string name = iniparser_getstring(d, "global:lower-in-name", "");
-	if (name.empty()) {
-		fprintf(stderr, "\"lower-in-name\" under \"global\" missing\n");
-		return 1;
-	}
 	std::string out_name = iniparser_getstring(d, "global:out-name", "");
 	if (out_name.empty()) {
 		fprintf(stderr, "\"out-name\" under \"global\" missing\n");
@@ -531,10 +503,6 @@ int main(int argc, char *argv[])
 
 	signal(SIGINT,  sig_handler);
 	signal(SIGTERM, sig_handler);
-
-	shm_message_queue *shm = create_shm(name, msg_queue_size);
-	if (shm == nullptr)
-		return 1;
 
 	shm_message_queue *shm_meta = create_shm(name_meta, msg_queue_size_meta);
 	if (shm_meta == nullptr)
@@ -561,12 +529,12 @@ int main(int argc, char *argv[])
 		wolfSSL_SetIOSend(ctx, my_wolfssl_send   );
 	}
 
-	run(shm, out_name, shm_meta, &sessions, sessions_lock, is_tls ? ctx : nullptr);
+	run(shm_meta, &sessions, sessions_lock, is_tls ? ctx : nullptr);
 
 	if (ctx)
 		wolfSSL_CTX_free(ctx);
 
-	delete shm;
+	delete shm_meta;
 
         wolfSSL_Cleanup();
 

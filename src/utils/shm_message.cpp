@@ -16,7 +16,7 @@ struct wrapped_up {
 } __attribute__((__packed__));
 
 struct wrapped_up_tcp {
-	uint32_t type;  // 0xdeadbeef
+	uint32_t type;  // 0xbeefefbe
 	uint64_t session_id;
 	size_t   from_len;
 	uint16_t from_port;
@@ -28,7 +28,7 @@ struct wrapped_up_tcp {
 } __attribute__((__packed__));
 
 struct wrapped_down {
-	uint32_t type;  // 0xbeefdead
+	uint32_t type;  // 0xeaddebbe
 	size_t  from_len;
 	size_t  to_len;
 	size_t  pl_len;
@@ -71,7 +71,7 @@ shm_message_queue::message * wrap_message_up_tcp(
 	shm_message_queue::message *msg = allocate_shm_message(total_length);
 	auto    *p            = reinterpret_cast<wrapped_up_tcp *>(msg->data);
 
-	p->type         = 0xdeadbeef;
+	p->type         = 0xbeefefbe;
 	p->from_len     = from_len;
 	p->from_port    = from_port;
 	p->to_len       = to_len;
@@ -148,7 +148,7 @@ bool unwrap_message_up_tcp(
                     size_t *const   pl_len,       const uint8_t **const pl)
 {
 	const wrapped_up_tcp *p = reinterpret_cast<const wrapped_up_tcp *>(m->data);
-	assert(p->type == 0xdeadbeef);
+	assert(p->type == 0xbeefefbe);
 
 	*session_id = p->session_id;
 
@@ -193,7 +193,7 @@ std::pair<uint8_t *, size_t> wrap_message_down(
 	uint8_t      *data         = reinterpret_cast<uint8_t *>(malloc(total_length));
 	wrapped_down *p            = reinterpret_cast<wrapped_down *>(data);
 
-	p->type     = 0xbeefdead;
+	p->type     = 0xeaddebbe;
 	p->from_len = from_len;
 	p->to_len   = to_len;
 	p->pl_len   = pl_len;
@@ -235,7 +235,7 @@ bool unwrap_message_down(
 		size_t *const pl_len,       const uint8_t **const pl)
 {
 	const wrapped_down *p = reinterpret_cast<const wrapped_down *>(in.first);
-	assert(p->type == 0xbeefdead);
+	assert(p->type == 0xeaddebbe);
 
 	*from_len =  p->from_len;
 	*from     = &p->data[0];

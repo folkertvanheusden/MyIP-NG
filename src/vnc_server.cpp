@@ -915,11 +915,6 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 	}
-	std::string name = iniparser_getstring(d, "global:lower-in-name", "");
-	if (name.empty()) {
-		fprintf(stderr, "\"lower-in-name\" under \"global\" missing\n");
-		return 1;
-	}
 	std::string out_name = iniparser_getstring(d, "global:out-name", "");
 	if (out_name.empty()) {
 		fprintf(stderr, "\"out-name\" under \"global\" missing\n");

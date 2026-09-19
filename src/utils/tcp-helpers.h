@@ -1,40 +1,56 @@
 #include <atomic>
 #include <cstdint>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "addresses.h"
 #include "queue.h"
 
 
-#define MI_TCP_FIN   1
+#define MI_TCP_FIN   1  // TODO via meta channel?
 #define MI_TCP_OPEN  2
 #define MI_TCP_CLOSE 4
 #define MI_IP4_MIN_TCP_MTU 536
 #define TCP_WAIT_FIN 30'000  // ms
 
+void receive_incoming_from_message_queue(shm_message_queue *const mq, queue<std::vector<uint8_t> > *const q_target);
+
 struct tcp_l7_session_t
 {
 	const uint64_t     session_id;
-	const std::string  out_name;
-	shm_message_queue *const shm;
+	shm_message_queue *const shm_in;
+	shm_message_queue *const shm_out;
 	const addr_ip4     from;
 	const uint16_t     from_port;
 	const addr_ip4     to;
 	const uint16_t     to_port;
+	std::thread       *in_th { };
 
 	std::atomic_bool   finished  { false };
 	std::atomic_bool   stop_flag { false };
 	queue<std::vector<uint8_t> > incoming;
 
-	tcp_l7_session_t(const uint64_t session_id, const std::string & out_name,
-		shm_message_queue *const shm,
+	tcp_l7_session_t(const uint64_t session_id,
+		shm_message_queue *const shm_in,
+		shm_message_queue *const shm_out,
 		const addr_ip4 from, const uint16_t from_port,
 		const addr_ip4 to,   const uint16_t to_port):
-		session_id(session_id), out_name(out_name), shm(shm),
+		session_id(session_id),
+		shm_in(shm_in), shm_out(shm_out),
 		from(from), from_port(from_port),
 		to  (to  ), to_port  (to_port  )
 	{
+		in_th = new std::thread([&] {
+				receive_incoming_from_message_queue(this->shm_out, &incoming);
+			});
+	}
+
+	virtual ~tcp_l7_session_t()
+	{
+		stop_flag = true;
+		in_th->join();
+		delete in_th;
 	}
 };
 

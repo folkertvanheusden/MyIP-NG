@@ -100,6 +100,10 @@ void tcp_data_free_function(tcp_data & p)
 struct session_t {
 	std::atomic_uint64_t updated_ts { };
 
+	std::string shm_name_base;
+	shm_message_queue *shm_in  { };
+	shm_message_queue *shm_out { };
+
 	bool        is_client;
 	char        shm_peer[max_id_length];  // only valid for is_client == true
 
@@ -124,6 +128,21 @@ struct session_t {
 	bool        l7_send_fin;  // L7 wants to end session
 	bool        fin_sent;
 	size_t      in_flight;  // limitted by local_window_size
+				//
+	session_t(const uint64_t session_id, const size_t segment_size) {
+		shm_name_base = std::format("{:x}_", session_id);
+		shm_in  = new shm_message_queue(shm_name_base + "rx", 16384);
+		shm_in->begin();  // TODO error handling
+		shm_out = new shm_message_queue(shm_name_base + "tx", 16384);
+		shm_out->begin();  // TODO error handling
+	}
+
+	~session_t() {
+		delete shm_out;
+		delete shm_in;
+		delete_shm(shm_name_base + "rx");
+		delete_shm(shm_name_base + "tx");
+	}
 };
 
 std::atomic_bool stop_flag { false };
@@ -298,7 +317,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 	    const std::string & out_name,
 	    std::map<uint64_t, session_t *> *const sessions, std::shared_mutex & sessions_lock, std::condition_variable_any & sessions_cv,
 	    const uint8_t syn_cookie_salt[16],
-	    shm_message_queue *const shm_meta)
+	    shm_message_queue *const shm_meta, const size_t payload_segment_size)
 {
 	set_thread_name("run_in");
 
@@ -579,20 +598,21 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				}
 				else if (auto it = mappings_in.find(destination_port); it != mappings_in.end()) {
 					// send 'open' to shm server
-					uint32_t flags_temp = MI_TCP_OPEN;
-					shm_message_queue::message *m_session = wrap_message_up_tcp(
-							session_id, 
-							from_len, from, source_port,
-							to_len,   to,   destination_port,
-							flags_temp,
-							0, nullptr);
-					bool ok = shm->send_message(it->second, m_session, false);
-					free(m_session);
+					const std::string open_msg =
+						std::format("session-id={:x}\naction=open\nfrom_addr={}\nfrom_port={}\nto_addr={}\nto_port={}",
+								session_id,
+								a_from.to_str('.', false), source_port,
+								a_to  .to_str('.', false), destination_port);
+					shm_message_queue::message *m_open = allocate_shm_message(open_msg.size());
+					m_open->type = shm_message_queue::msg_new;
+					memcpy(m_open->data, open_msg.c_str(), m_open->size);
+					bool ok = shm_meta->send_message(it->second, m_open, false);
+					free(m_open);
 
 					// allocate session
 					if (ok) {
 						DOLOG(logger::ll_debug, "INF) server for TCP/%d notified via %s of new session %" PRIx64, destination_port, it->second.c_str(), session_id);
-						session_t *new_session = new session_t();
+						session_t *new_session = new session_t(session_id, payload_segment_size);
 						new_session->is_client         = false;
 						new_session->state             = established;
 						new_session->local_seq         = ack_seq_nr;
@@ -637,6 +657,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 
 		// send data to local shm peer
 		if (session != nullptr && invalid == false) {
+			DOLOG(logger::ll_debug, "DBG) send to L7 for %" PRIx64, session_id);
 			if (peer_seq_nr == session->peer_seq) {
 				bool ok = true;
 				if (tcp_pl_size > 0) {
@@ -648,10 +669,11 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 							to_len,   to,   destination_port,
 							flags_temp,
 							tcp_pl_size, &pl[header_size]);
-					ok = shm->send_message(session->shm_peer, m_session, false);
+					ok = session->shm_out->put_message(m_session);
 					free(m_session);
 				}
 
+				// if shared memory put succeeded, send ACK to TCP peer
 				if (ok) {
 					DOLOG(logger::ll_debug, "INF) Session %" PRIx64 ", data (%d bytes) sent to L7",
 							session_id, tcp_pl_size);
@@ -780,7 +802,7 @@ void run_out(shm_message_queue *const shm, const std::string & out_name, shm_mes
 
 		while(!stop_flag) {
 			for(auto & session: *sessions) {
-				// it would be a bug if L7 sends more data with find_sent set to true
+				// it would be a bug if L7 sends more data with fin_sent set to true
 				if (session.second->in_flight != 0 || session.second->fin_sent == true)
 					continue;
 
@@ -888,7 +910,8 @@ void dump_sessions(std::map<uint64_t, session_t *> *const sessions, std::shared_
 void run_meta(shm_message_queue *const shm, const std::string & out_name,
 	      const addr & from_addr,
 	      shm_message_queue *const shm_meta,
-	      std::map<uint64_t, session_t *> *const sessions, std::shared_mutex & sessions_lock)
+	      std::map<uint64_t, session_t *> *const sessions, std::shared_mutex & sessions_lock,
+	      const size_t payload_segment_size)
 {
 	set_thread_name("run_meta");
 
@@ -977,7 +1000,7 @@ void run_meta(shm_message_queue *const shm, const std::string & out_name,
 
 				if (failed == false) {
 					uint64_t session_id = calc_session_id(dst_port.value(), src_port, dst_addr.value(), from_addr);
-					session_t *new_session = new session_t();
+					session_t *new_session = new session_t(session_id, payload_segment_size);
 					new_session->is_client         = true;
 					memset(new_session->shm_peer, 0x00, max_id_length);
 					memcpy(new_session->shm_peer, shm_data_address.value().c_str(), shm_data_address.value().size());
@@ -1084,8 +1107,7 @@ void run_clean(std::map<uint64_t, session_t *> *const sessions, std::shared_mute
 	while(!stop_flag) {
 		usleep(SLEEP_INTERVAL_MS);
 
-		uint64_t now = get_us();
-
+		uint64_t now { get_us() };
 		std::vector<uint64_t> clean_list;
 
 		{
@@ -1119,12 +1141,13 @@ void run(shm_message_queue *const shm, const std::string & out_name,
 	 const std::string & icmp_error_name,
 	 std::map<uint64_t, session_t *> *const sessions, std::shared_mutex & sessions_lock, std::condition_variable_any & sessions_cv,
 	 const uint8_t syn_cookie_salt[16],
-	 shm_message_queue *const shm_meta, const addr & local_addr)
+	 shm_message_queue *const shm_meta, const addr & local_addr,
+	 const size_t payload_segment_size)
 {
 	std::thread rx   ([&] { run_in   (shm, mappings_in, icmp_error_name, out_name,
-				sessions, sessions_lock, sessions_cv, syn_cookie_salt, shm_meta); });
+				sessions, sessions_lock, sessions_cv, syn_cookie_salt, shm_meta, payload_segment_size); });
 	std::thread tx   ([&] { run_out  (shm_upper, out_name, shm, sessions, sessions_lock, sessions_cv); });
-	std::thread meta ([&] { run_meta (shm, out_name, local_addr, shm_meta, sessions, sessions_lock); });
+	std::thread meta ([&] { run_meta (shm, out_name, local_addr, shm_meta, sessions, sessions_lock, payload_segment_size); });
 	std::thread clean([&] { run_clean(sessions, sessions_lock); });
 	clean.join();
 	meta .join();
@@ -1247,6 +1270,11 @@ int main(int argc, char *argv[])
 		msg_queue_size = 16384;
 		fprintf(stderr, "Using default msg queue size of %d bytes\n", msg_queue_size);
 	}
+	int payload_segment_size = iniparser_getint(d, "specific:payload-msg-queue-size", 0);
+	if (payload_segment_size == 0) {
+		payload_segment_size = 16384;
+		fprintf(stderr, "Using default payload msg queue size of %d bytes\n", payload_segment_size);
+	}
 	std::map<uint16_t, std::string> mappings_in;
 	load_mappings_single(&mappings_in, d);
 	iniparser_freedict(d);
@@ -1277,7 +1305,10 @@ int main(int argc, char *argv[])
 	if (stop_flag)
 		return 1;
 
-	run(shm, out_name, mappings_in, shm_upper, icmp_error_name, &sessions, sessions_lock, sessions_cv, syn_cookie_salt, shm_meta, send_addr);
+	run(shm, out_name, mappings_in, shm_upper, icmp_error_name,
+			&sessions, sessions_lock, sessions_cv,
+			syn_cookie_salt,
+			shm_meta, send_addr, payload_segment_size);
 
 	delete shm_meta;
 	delete shm_upper;

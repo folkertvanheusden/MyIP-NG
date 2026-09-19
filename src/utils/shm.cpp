@@ -206,6 +206,61 @@ shm_message_queue::message * shm_message_queue::wait_for_message(const int timeo
 	return nullptr;
 }
 
+bool shm_message_queue::put_message(message *const m)
+{
+	uint32_t length            = m->size;
+	size_t   total_msg_length  = sizeof(message) + length;
+	bool     ok                = false;
+	size_t   padded_msg_length = PAD8(total_msg_length);
+	auto    *put_shm           = get_shm;  // same channel
+	assert(put_shm);
+
+	assert(length > 0);
+
+	if (int err = pthread_mutex_lock(&put_shm->mutex); err != 0) {
+		if (err == EOWNERDEAD) {
+			DOLOG(logger::ll_error, "pthread_mutex_lock returned EOWNERDEAD, \"repairing\" mutex...");
+			pthread_mutex_consistent(&put_shm->mutex);
+		}
+		else {
+			DOLOG(logger::ll_error, "pthread_mutex_lock failed: %s", strerror(err));
+			return false;
+		}
+	}
+
+	if (m->type != msg_reply)
+		m->msg_nr = ++put_shm->most_recent_msg_nr;
+	memset(m->sender, 0x00, sizeof(m->sender));
+	memcpy(m->sender, local_identifier.c_str(), local_identifier.size());
+
+	for(;;) {
+		if (put_shm->total_size >= put_shm->filled + padded_msg_length) {
+			memcpy(&put_shm->data[put_shm->filled], m, total_msg_length);
+			put_shm->filled += padded_msg_length;
+
+			if (int err = pthread_cond_broadcast(&put_shm->condition_put); err != 0)
+				DOLOG(logger::ll_error, "pthread_cond_signal failed: %s", strerror(err));
+			else
+				ok = true;
+			break;
+		}
+
+		DOLOG(logger::ll_debug, "queue full, waiting...");
+
+		if (int err = pthread_cond_wait(&put_shm->condition_get, &put_shm->mutex); err != 0) {
+			DOLOG(logger::ll_error, "pthread_cond_wait failed: %s", strerror(err));
+			break;
+		}
+	}
+
+	if (int err = pthread_mutex_unlock(&put_shm->mutex); err != 0) {
+		DOLOG(logger::ll_error, "pthread_mutex_unlock failed: %s", strerror(err));
+		return false;
+	}
+
+	return true;
+}
+
 bool shm_message_queue::send_message(const std::string & remote_identifier, message *const m, const bool blocking)
 {
 	DOLOG(logger::ll_debug, "send %smessage to %s (from %s)", blocking ? "blocking ":"", remote_identifier.c_str(), local_identifier.c_str());
@@ -301,4 +356,15 @@ shm_message_queue::message *allocate_shm_message(const size_t size)
 	auto out = reinterpret_cast<shm_message_queue::message *>(calloc(1, sizeof(shm_message_queue::message) + size));
 	out->size = size;
 	return out;
+}
+
+void delete_shm(const std::string & name)
+{
+#if defined(linux)
+	if (shm_unlink(name.c_str()) == -1)
+		DOLOG(logger::ll_warning, "segment with name \"%\" was already gone?", name.c_str());
+#else
+	if (shm_unlink(("/" + name).c_str()) == -1)
+		DOLOG(logger::ll_warning, "segment with name \"%\" was already gone?", name.c_str());
+#endif
 }
