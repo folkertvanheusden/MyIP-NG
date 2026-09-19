@@ -22,7 +22,7 @@ int send_func(tcp_l7_session_t *const session, const uint8_t *const from, const 
 	memcpy(&data_msg->data[8], &flags, 4);
 	memcpy(&data_msg->data[12], from, n);
 
-	if (session->shm_out->put_message(data_msg) == false)
+	if (session->shm_in->put_message(data_msg) == false)
 		DOLOG(logger::ll_warning, "Cannot send data via shm-out");
 	else
 		rc = n;
@@ -70,7 +70,7 @@ void fin_func(tcp_l7_session_t *const session)
 	uint32_t flags = MI_TCP_FIN;
 	memcpy(&end_msg->data[8], &flags, 4);
 
-	if (session->shm_out->put_message(end_msg) == false)
+	if (session->shm_in->put_message(end_msg) == false)
 		DOLOG(logger::ll_warning, "Cannot send FIN message");
 
 	free(end_msg);
