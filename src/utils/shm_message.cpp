@@ -58,7 +58,7 @@ std::pair<uint8_t *, size_t> wrap_message_up(
 	return { data, total_length };
 }
 
-shm_message_queue::message * wrap_message_up_tcp(
+shm_message_queue::message * wrap_message_to_tcp_l7(
 					  const uint64_t session_id, 
 		                          const size_t   from_len,     const uint8_t *const from,
 					  const uint16_t from_port,
@@ -137,7 +137,7 @@ bool unwrap_message_up(
 	return true;
 }
 
-bool unwrap_message_up_tcp(
+bool unwrap_message_to_tcp_l7(
 		    const shm_message_queue::message *const m,
 		    uint64_t *const session_id,
 		    size_t *const   from_len,     const uint8_t **const from,

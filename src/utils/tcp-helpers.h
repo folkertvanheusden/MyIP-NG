@@ -19,8 +19,8 @@ void receive_incoming_from_message_queue(shm_message_queue *const mq, queue<std:
 struct tcp_l7_session_t
 {
 	const uint64_t     session_id;
-	shm_message_queue *const shm_in;
-	shm_message_queue *const shm_out;
+	shm_message_queue *const shm_from_l7;
+	shm_message_queue *const shm_to_l7;
 	const addr_ip4     from;
 	const uint16_t     from_port;
 	const addr_ip4     to;
@@ -32,17 +32,17 @@ struct tcp_l7_session_t
 	queue<std::vector<uint8_t> > incoming;
 
 	tcp_l7_session_t(const uint64_t session_id,
-		shm_message_queue *const shm_in,
-		shm_message_queue *const shm_out,
+		shm_message_queue *const shm_from_l7,
+		shm_message_queue *const shm_to_l7,
 		const addr_ip4 from, const uint16_t from_port,
 		const addr_ip4 to,   const uint16_t to_port):
 		session_id(session_id),
-		shm_in(shm_in), shm_out(shm_out),
+		shm_from_l7(shm_from_l7), shm_to_l7(shm_to_l7),
 		from(from), from_port(from_port),
 		to  (to  ), to_port  (to_port  )
 	{
 		in_th = new std::thread([&] {
-				receive_incoming_from_message_queue(this->shm_out, &incoming);
+				receive_incoming_from_message_queue(this->shm_to_l7, &incoming);
 			});
 	}
 

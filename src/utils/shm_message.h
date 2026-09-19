@@ -13,7 +13,7 @@ shm_message_queue::message * wrap_message_up(
                                           const size_t pl_len,       const uint8_t *const pl,
 					  const std::optional<uint64_t> reply_to);
 // for TCP connected L7
-shm_message_queue::message * wrap_message_up_tcp(
+shm_message_queue::message * wrap_message_to_tcp_l7(
 					  const uint64_t session_id, 
 		                          const size_t   from_len,     const uint8_t *const from,
 					  const uint16_t from_port,
@@ -45,7 +45,7 @@ bool unwrap_message_up(
 		    size_t *const from_len,     const uint8_t **const from,
                     size_t *const to_len,       const uint8_t **const to,
                     size_t *const pl_len,       const uint8_t **const pl);
-bool unwrap_message_up_tcp(
+bool unwrap_message_to_tcp_l7(
 		    const shm_message_queue::message *const m,
 		    uint64_t *const session_id,
 		    size_t *const   from_len,     const uint8_t **const from,

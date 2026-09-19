@@ -747,7 +747,7 @@ void run_in(shm_message_queue *const shm, const std::string & out_name,
                 const uint8_t *from         = nullptr;
                 const uint8_t *to           = nullptr;
                 const uint8_t *pl           = nullptr;
-		if (unwrap_message_up_tcp(
+		if (unwrap_message_to_tcp_l7(
 				m,
 				&session_id,
 				&from_len, &from,

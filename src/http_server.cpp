@@ -294,8 +294,8 @@ void delete_session(std::pair<std::thread *, http_session_t *> & s)
 		s.first->join();
 		delete s.first;
 	}
-	delete s.second->shm_out;
-	delete s.second->shm_in;
+	delete s.second->shm_to_l7;
+	delete s.second->shm_from_l7;
 	delete s.second;
 }
 
@@ -412,15 +412,14 @@ void run_meta(shm_message_queue *const shm_meta,
 			std::string shm_name_base { std::format("{:x}_", session_id.value()) };
 			auto shm_in  = new shm_message_queue(shm_name_base + "rx", 16384);
 			shm_in ->begin();  // TODO error handling
-			auto shm_out = new shm_message_queue(shm_name_base + "tx", 16384);
-			shm_out->begin();  // TODO error handling
+			auto shm_to_l7 = new shm_message_queue(shm_name_base + "tx", 16384);
+			shm_to_l7->begin();  // TODO error handling
 
 			std::unique_lock<std::mutex> lck(sessions_lock);
-			auto it = sessions->find(session_id.value());
-			DOLOG(logger::ll_debug, "New session %" PRIx64, session_id);
+			DOLOG(logger::ll_debug, "New session %" PRIx64, session_id.value());
 			http_session_t *hs = new http_session_t(
 					session_id.value(),
-					shm_in, shm_out,
+					shm_in, shm_to_l7,
 					from_addr.value(), from_port.value(),
 					to_addr  .value(), to_port  .value(),
 					ctx);

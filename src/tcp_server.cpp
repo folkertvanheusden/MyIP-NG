@@ -663,7 +663,7 @@ void run_in(shm_message_queue *const shm, const std::map<uint16_t, std::string> 
 				if (tcp_pl_size > 0) {
 					DOLOG(logger::ll_debug, "INF) send MI_TCP_FIN to L7 for %" PRIx64, session_id);
 					uint32_t flags_temp = session->half_closed ? MI_TCP_FIN : 0;
-					shm_message_queue::message *m_session = wrap_message_up_tcp(
+					shm_message_queue::message *m_session = wrap_message_to_tcp_l7(
 							session_id, 
 							from_len, from, source_port,
 							to_len,   to,   destination_port,
@@ -769,7 +769,7 @@ clean:
 
 				// send 'close' to shm server
 				uint32_t flags_temp = MI_TCP_CLOSE;
-				shm_message_queue::message *m_session = wrap_message_up_tcp(
+				shm_message_queue::message *m_session = wrap_message_to_tcp_l7(
 						session_id,
 						from_len, from, source_port,
 						to_len,   to,   destination_port,
